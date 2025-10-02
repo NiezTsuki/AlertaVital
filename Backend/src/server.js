@@ -1,22 +1,64 @@
+import http from 'http';
 import express from 'express';
 import morgan from 'morgan';
 import cors from 'cors';
 import helmet from 'helmet';
+import { Server } from 'socket.io';
+
 import { config } from './config/env.js';
 import authRoutes from './routes/auth.routes.js';
 import cuidadoresRoutes from './routes/cuidadores.routes.js';
+import alertasRoutes from './routes/alertas.routes.js';     // <— NUEVO
+import { authMiddlewareSocket } from './middleware/auth-socket.js'; // <— NUEVO
+import { setAlertsIO } from './services/alertas.service.js';        // <— NUEVO
 
 const app = express();
 app.use(helmet());
-app.use(cors());
+app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE','PATCH'] }));
 app.use(express.json());
 app.use(morgan('dev'));
 
+// Rutas HTTP
 app.use('/api', cuidadoresRoutes);
 app.use('/api', authRoutes);
+app.use('/auth', authRoutes);
+// NUEVO: alertas (SOS, aceptar, derivar, completar)
+app.use('/api', alertasRoutes);
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
-app.use('/auth', authRoutes);
+
+// Nota: evitamos duplicar /auth (ya está en /api)
+// app.use('/auth', authRoutes);
+
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
-app.listen(config.port, () => console.log(`API http://localhost:${config.port}`));
+// HTTP server + Socket.IO
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: { origin: '*', methods: ['GET','POST'] },
+});
+
+// Auth JWT para sockets (usa tu middleware)
+io.use(authMiddlewareSocket);
+
+// Salas por rol y por alerta
+io.on('connection', (socket) => {
+  const user = socket.user; // { sub, rol }
+  if (!user) return socket.disconnect(true);
+
+  // Salas por usuario
+  if (user.rol === 'ADULTO_MAYOR') socket.join(`adulto:${user.sub}`);
+  if (user.rol === 'CUIDADOR')     socket.join(`cuidador:${user.sub}`);
+
+  // Sala por alerta cuando el adulto abre el detalle
+  socket.on('join_alerta', ({ alertaId }) => {
+    if (alertaId) socket.join(`adulto_alerta:${alertaId}`);
+  });
+});
+
+// Inyecta io al servicio de alertas
+setAlertsIO(io);
+
+server.listen(config.port, () =>
+  console.log(`API + Sockets escuchando en http://localhost:${config.port}`)
+);
