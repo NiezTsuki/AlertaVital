@@ -1,10 +1,5 @@
-// src/middleware/auth-socket.js
-// Middleware de autenticación para Socket.IO compatible con:
-// - Authorization: Bearer <jwt>  (Android/iOS/Desktop)
-// - handshake.auth.token          (Flutter Web)
-// - query.token                   (fallback opcional)
 import jwt from 'jsonwebtoken';
-import { config } from '../config/env.js'; // asegúrate de exponer config.jwtSecret
+import { config } from '../config/env.js'; 
 
 export function authMiddlewareSocket(socket, next) {
   try {

@@ -8,9 +8,11 @@ import { Server } from 'socket.io';
 import { config } from './config/env.js';
 import authRoutes from './routes/auth.routes.js';
 import cuidadoresRoutes from './routes/cuidadores.routes.js';
-import alertasRoutes from './routes/alertas.routes.js';     // <— NUEVO
-import { authMiddlewareSocket } from './middleware/auth-socket.js'; // <— NUEVO
-import { setAlertsIO } from './services/alertas.service.js';        // <— NUEVO
+import alertasRoutes from './routes/alertas.routes.js';     
+import { authMiddlewareSocket } from './middleware/auth-socket.js'; 
+import { setAlertsIO } from './services/alertas.service.js';       
+import ubicacionesRoutes from './routes/ubicaciones.routes.js';
+import alertasPosRoutes from './routes/alertas_posiciones.routes.js';
 
 const app = express();
 app.use(helmet());
@@ -22,6 +24,9 @@ app.use(morgan('dev'));
 app.use('/api', cuidadoresRoutes);
 app.use('/api', authRoutes);
 app.use('/auth', authRoutes);
+// Ubicaciones
+app.use('/api', ubicacionesRoutes);
+app.use('/api', alertasPosRoutes);
 // NUEVO: alertas (SOS, aceptar, derivar, completar)
 app.use('/api', alertasRoutes);
 

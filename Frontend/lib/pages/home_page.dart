@@ -1,7 +1,19 @@
 // lib/pages/home_page.dart
+//
+// Flujo actualizado:
+// - ADULTO_MAYOR: botón SOS (grande); al crear alerta, se envía GPS y se inicia
+//   un tracking periódico a /api/alertas/:id/posicion + heartbeat a /api/ubicaciones.
+//   Recibe eventos: cuidador_en_camino, derivada_siguiente, alerta_completada, alerta_emergencia.
+// - CUIDADOR: escucha 'alerta_nueva'; acepta (abre mapa con coords) o deriva.
+//   Mantiene heartbeat de ubicación a /api/ubicaciones para selección por cercanía.
+//
+// Nota: mantiene el diseño del header (Vincular, Mis vínculos, Cerrar sesión)
+// y no muestra el botón SOS a cuidadores.
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../auth_state.dart';                 // expone: token (String?), user (Map?)
 import '../api.dart';                        // para Api.baseUrl
@@ -10,6 +22,7 @@ import '../alertas_api.dart';       // API de alertas (HTTP + Socket)
 import 'vincular_page.dart';
 import 'mis_vinculos_page.dart';
 import 'login_page.dart';
+import 'mapa_alerta_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -20,12 +33,16 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   // ===== Estado del flujo SOS (adulto) =====
   Timer? _sosTimer;
+  Timer? _adultoTrailTimer;      // tracking periódico de alerta activa
   int _countdown = 0;
   String? _alertaId;
   String _estadoTexto = 'Listo para ayudar';
 
   // ===== Estado de cuidador: alertas entrantes =====
   final List<_IncomingAlert> _incoming = [];
+
+  // ===== Heartbeat general de ubicación (para entrenamiento/proximidad) =====
+  Timer? _hbTimer;               // heartbeat para registrar /api/ubicaciones
 
   // ===== Helpers de rol/credenciales =====
   bool get _esAdultoMayor {
@@ -48,11 +65,16 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     // Conecta socket si hay sesión y cablea listener para cuidadores
     unawaited(_wireCaregiverSocket());
+    // Arranca heartbeat de ubicación (ambos roles)
+    _startHeartbeatUbicacion();
   }
 
   @override
   void dispose() {
     _stopCountdown();
+    _stopAdultoTrail();
+    _stopHeartbeatUbicacion();
+    AlertasApi.dispose();
     super.dispose();
   }
 
@@ -68,9 +90,11 @@ class _HomePageState extends State<HomePage> {
   Future<void> _logout() async {
     final auth = context.read<AuthState>();
     try {
-      // Si tu AuthState tiene logout(), úsalo:
       await (auth as dynamic).logout?.call();
     } catch (_) {}
+    _stopCountdown();
+    _stopAdultoTrail();
+    _stopHeartbeatUbicacion();
     AlertasApi.dispose();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
@@ -84,23 +108,39 @@ class _HomePageState extends State<HomePage> {
     final token = _token;
     if (token == null || token.isEmpty) return;
 
-    // Conecta socket de alertas (idempotente)
     AlertasApi.configure(baseUrl: Api.baseUrl, token: token);
     await AlertasApi.initSocket();
 
+    // Listeners comunes para el adulto (por si abre SOS)
+    AlertasApi.off('cuidador_en_camino');
+    AlertasApi.off('derivada_siguiente');
+    AlertasApi.off('alerta_completada');
+    AlertasApi.off('alerta_emergencia');
+
+    AlertasApi.on('cuidador_en_camino', _onEnCamino);
+    AlertasApi.on('derivada_siguiente', _onDerivada);
+    AlertasApi.on('alerta_completada', _onCompletada);
+    AlertasApi.on('alerta_emergencia', _onEmergencia);
+
     if (_esCuidador) {
-      // Evita duplicados en hot-reload
       AlertasApi.off('alerta_nueva');
       AlertasApi.on('alerta_nueva', (data) {
         final alertaId = (data?['alertaId'] ?? '').toString();
-        final orden = (data?['orden'] ?? 1) as int;
+        final orden = (data?['orden'] ?? 1) is num ? (data['orden'] as num).toInt() : 1;
+        final lat = (data?['latitud'] as num?)?.toDouble();
+        final lon = (data?['longitud'] as num?)?.toDouble();
+        final precision = (data?['precision_metros'] as num?)?.toDouble();
+
         if (alertaId.isEmpty || !mounted) return;
 
-        // Si ya está en la lista, no la duplicamos
         final exists = _incoming.any((a) => a.alertaId == alertaId);
         if (!exists) {
           setState(() {
-            _incoming.insert(0, _IncomingAlert(alertaId: alertaId, orden: orden));
+            _incoming.insert(0, _IncomingAlert(
+              alertaId: alertaId,
+              orden: orden,
+              lat: lat, lon: lon, precision: precision,
+            ));
           });
         }
 
@@ -111,12 +151,46 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // ===== Flujo SOS (adulto mayor) =====
+  // ===== Heartbeat de ubicación (para ML y cercanía): ambos roles =====
+  void _startHeartbeatUbicacion() {
+    _hbTimer?.cancel();
+    _hbTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+      final pos = await _getCurrentPosition();
+      if (pos == null) return;
+      try {
+        await AlertasApi.registrarUbicacion(pos.latitude, pos.longitude, precision: pos.accuracy);
+      } catch (_) {}
+    });
+  }
+
+  void _stopHeartbeatUbicacion() {
+    _hbTimer?.cancel();
+    _hbTimer = null;
+  }
+
+  // ===== ADULTO: SOS + GPS =====
   Future<void> _initAlertSocketIfNeeded() async {
     final token = _token;
     if (token == null || token.isEmpty) return;
     AlertasApi.configure(baseUrl: Api.baseUrl, token: token);
     await AlertasApi.initSocket();
+  }
+
+  Future<Position?> _getCurrentPosition() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return null;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        return null;
+      }
+      return Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _onSosPressed() async {
@@ -132,8 +206,17 @@ class _HomePageState extends State<HomePage> {
     try {
       await _initAlertSocketIfNeeded();
 
-      // 1) Crear alerta
-      final r = await AlertasApi.crearSOS(countdown: 30, tipo: 'SOS');
+      // 1) Obtener ubicación (si falla, igual envía SOS)
+      final pos = await _getCurrentPosition();
+
+      // 2) Crear alerta (con coords si están disponibles)
+      final r = await AlertasApi.crearSOS(
+        countdown: 30,
+        tipo: 'SOS',
+        lat: pos?.latitude,
+        lon: pos?.longitude,
+        precision: pos?.accuracy,
+      );
       final id = (r['alertaId'] ?? '').toString();
       if (id.isEmpty) throw Exception('No se pudo crear la alerta');
 
@@ -143,17 +226,13 @@ class _HomePageState extends State<HomePage> {
         _estadoTexto = 'Notificando al cuidador más cercano…';
       });
 
-      // 2) Unirse a la sala de la alerta
       AlertasApi.joinAlerta(id);
 
-      // 3) Listeners
-      AlertasApi.on('cuidador_en_camino', _onEnCamino);
-      AlertasApi.on('derivada_siguiente', _onDerivada);
-      AlertasApi.on('alerta_completada', _onCompletada);
-      AlertasApi.on('alerta_emergencia', _onEmergencia);
-
-      // 4) Countdown visual
+      // 3) Countdown visual
       _startCountdown();
+
+      // 4) Iniciar tracking durante la alerta (cada 7s)
+      _startAdultoTrail();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -184,6 +263,7 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
     setState(() => _estadoTexto = 'Alerta finalizada.');
     _stopCountdown();
+    _stopAdultoTrail();
     Future.delayed(const Duration(seconds: 1), () {
       if (mounted) setState(() => _alertaId = null);
     });
@@ -193,6 +273,7 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
     setState(() => _estadoTexto = 'Sin cuidadores disponibles.\nLlamado de emergencia realizado.');
     _stopCountdown();
+    _stopAdultoTrail();
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) setState(() => _alertaId = null);
     });
@@ -209,6 +290,29 @@ class _HomePageState extends State<HomePage> {
   void _stopCountdown() {
     _sosTimer?.cancel();
     _sosTimer = null;
+  }
+
+  // Tracking del adulto durante la alerta activa
+  void _startAdultoTrail() {
+    _stopAdultoTrail();
+    if (_alertaId == null) return;
+    _adultoTrailTimer = Timer.periodic(const Duration(seconds: 7), (_) async {
+      if (_alertaId == null) return;
+      final pos = await _getCurrentPosition();
+      if (pos == null) return;
+      try {
+        await AlertasApi.registrarPosicionAlerta(
+          _alertaId!, pos.latitude, pos.longitude, precision: pos.accuracy,
+        );
+        // Además registra última ubicación genérica (ayuda a proximidad futura)
+        await AlertasApi.registrarUbicacion(pos.latitude, pos.longitude, precision: pos.accuracy);
+      } catch (_) {}
+    });
+  }
+
+  void _stopAdultoTrail() {
+    _adultoTrailTimer?.cancel();
+    _adultoTrailTimer = null;
   }
 
   // ===== UI =====
@@ -280,6 +384,20 @@ class _HomePageState extends State<HomePage> {
     try {
       await AlertasApi.aceptarAlerta(item.alertaId);
       if (!mounted) return;
+
+      // Abrir el mapa si hay coordenadas
+      if (item.lat != null && item.lon != null) {
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => MapaAlertaPage(
+            lat: item.lat!, lon: item.lon!, alertaId: item.alertaId,
+          ),
+        ));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ubicación no disponible')),
+        );
+      }
+
       setState(() => _incoming.removeWhere((e) => e.alertaId == item.alertaId));
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('¡Vas en camino!')),
@@ -313,10 +431,16 @@ class _HomePageState extends State<HomePage> {
 class _IncomingAlert {
   final String alertaId;
   final int orden;
+  final double? lat;
+  final double? lon;
+  final double? precision;
   final DateTime receivedAt;
   _IncomingAlert({
     required this.alertaId,
     required this.orden,
+    this.lat,
+    this.lon,
+    this.precision,
     DateTime? receivedAt,
   }) : receivedAt = receivedAt ?? DateTime.now();
 }
@@ -354,6 +478,8 @@ class _CaregiverView extends StatelessWidget {
           return _IncomingCard(
             alertaId: a.alertaId,
             orden: a.orden,
+            lat: a.lat,
+            lon: a.lon,
             receivedAt: a.receivedAt,
             onAccept: () => onAccept(a),
             onDerive: () => onDerive(a),
@@ -367,6 +493,8 @@ class _CaregiverView extends StatelessWidget {
 class _IncomingCard extends StatelessWidget {
   final String alertaId;
   final int orden;
+  final double? lat;
+  final double? lon;
   final DateTime receivedAt;
   final VoidCallback onAccept;
   final VoidCallback onDerive;
@@ -374,6 +502,8 @@ class _IncomingCard extends StatelessWidget {
   const _IncomingCard({
     required this.alertaId,
     required this.orden,
+    required this.lat,
+    required this.lon,
     required this.receivedAt,
     required this.onAccept,
     required this.onDerive,
@@ -399,13 +529,15 @@ class _IncomingCard extends StatelessWidget {
           children: [
             Text('Alerta SOS', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 _InfoChip(label: 'ID', value: alertaId.substring(0, alertaId.length >= 6 ? 6 : alertaId.length)),
-                const SizedBox(width: 8),
                 _InfoChip(label: 'Orden', value: '$orden'),
-                const SizedBox(width: 8),
                 _InfoChip(label: 'Hora', value: '$hh:$mm'),
+                if (lat != null && lon != null)
+                  _InfoChip(label: 'GPS', value: '${lat!.toStringAsFixed(5)}, ${lon!.toStringAsFixed(5)}'),
               ],
             ),
             const SizedBox(height: 12),

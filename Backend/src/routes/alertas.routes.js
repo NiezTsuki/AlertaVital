@@ -4,57 +4,71 @@ import { crearAlertaRT, aceptarAlerta, derivarAlerta, completarAlerta } from '..
 
 const router = Router();
 
-// Adulto mayor emite SOS/CAIDA
+// Adulto mayor emite SOS/CAIDA (con coords si están disponibles)
 router.post('/alertas/sos', auth, async (req, res) => {
   try {
-    if (req.user?.rol !== 'ADULTO_MAYOR') {
-      return res.status(403).json({ error: 'No autorizado' });
-    }
-    const { tipo='SOS', descripcion=null, countdown=30 } = req.body || {};
-    const data = await crearAlertaRT({ adultoId: req.user.sub, tipo, descripcion, countdownSeg: countdown });
+    if (req.user?.rol !== 'ADULTO_MAYOR') return res.status(403).json({ error: 'No autorizado' });
+
+    const {
+      tipo = 'SOS',
+      descripcion = null,
+      countdown = 30,
+      latitud = null,
+      longitud = null,
+      precision_metros = null,
+    } = req.body || {};
+
+    const data = await crearAlertaRT({
+      adultoId: req.user.sub,
+      tipo,
+      descripcion,
+      countdownSeg: countdown,
+      latitud,
+      longitud,
+      precision_metros,
+    });
+
     res.status(201).json({ ok: true, ...data });
   } catch (e) {
-    console.error(e); res.status(500).json({ error: 'No se pudo crear la alerta' });
+    console.error(e);
+    res.status(500).json({ error: 'No se pudo crear la alerta' });
   }
 });
 
 // Cuidador: Voy en camino
 router.post('/alertas/:id/aceptar', auth, async (req, res) => {
   try {
-    if (req.user?.rol !== 'CUIDADOR') {
-      return res.status(403).json({ error: 'No autorizado' });
-    }
+    if (req.user?.rol !== 'CUIDADOR') return res.status(403).json({ error: 'No autorizado' });
     const ok = await aceptarAlerta({ alertaId: req.params.id, cuidadorId: req.user.sub });
     if (!ok) return res.status(409).json({ error: 'No disponible o ya tomada' });
     res.json({ ok: true });
   } catch (e) {
-    console.error(e); res.status(500).json({ error: 'Error al aceptar' });
+    console.error(e);
+    res.status(500).json({ error: 'Error al aceptar' });
   }
 });
 
 // Cuidador: Derivar
 router.post('/alertas/:id/derivar', auth, async (req, res) => {
   try {
-    if (req.user?.rol !== 'CUIDADOR') {
-      return res.status(403).json({ error: 'No autorizado' });
-    }
+    if (req.user?.rol !== 'CUIDADOR') return res.status(403).json({ error: 'No autorizado' });
     const r = await derivarAlerta({ alertaId: req.params.id, cuidadorId: req.user.sub });
     res.json({ ok: true, ...r });
   } catch (e) {
-    console.error(e); res.status(500).json({ error: 'Error al derivar' });
+    console.error(e);
+    res.status(500).json({ error: 'Error al derivar' });
   }
 });
 
-// Completar/cerrar (opcional)
+// Completar/cerrar
 router.post('/alertas/:id/completar', auth, async (req, res) => {
   try {
-    if (req.user?.rol !== 'CUIDADOR') {
-      return res.status(403).json({ error: 'No autorizado' });
-    }
+    if (req.user?.rol !== 'CUIDADOR') return res.status(403).json({ error: 'No autorizado' });
     const ok = await completarAlerta({ alertaId: req.params.id, cuidadorId: req.user.sub });
     res.json({ ok });
   } catch (e) {
-    console.error(e); res.status(500).json({ error: 'Error al completar' });
+    console.error(e);
+    res.status(500).json({ error: 'Error al completar' });
   }
 });
 

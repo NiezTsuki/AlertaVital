@@ -3,7 +3,7 @@ import { pool } from '../db/pool.js';
 let ioRef = null;
 export function setAlertsIO(io) { ioRef = io; }
 
-// Última ubicación por usuario
+// Última ubicación por usuario (para fallback)
 const lastLocationCTE = `
 WITH ult_ub AS (
   SELECT DISTINCT ON (usuario_id)
@@ -25,15 +25,17 @@ function haversine(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-// Más cercano actual (excluye los ya intentados)
-async function pickNearestNow(adultoId, excludedCuidadorIds = []) {
-  const adultoLoc = await pool.query(`
-    ${lastLocationCTE}
-    SELECT u.latitud, u.longitud FROM ult_ub u WHERE u.usuario_id = $1
-  `, [adultoId]);
-
-  const adultLat = adultoLoc.rows[0]?.latitud ?? null;
-  const adultLon = adultoLoc.rows[0]?.longitud ?? null;
+// Elegir más cercano ahora (permitiendo pasar lat/lon del adulto)
+async function pickNearestNow({ adultoId, adultLat = null, adultLon = null, excludedCuidadorIds = [] }) {
+  // Si no me pasaron lat/lon del adulto, intento obtenerlas de ubicaciones (última)
+  if (adultLat == null || adultLon == null) {
+    const adultoLoc = await pool.query(`
+      ${lastLocationCTE}
+      SELECT u.latitud, u.longitud FROM ult_ub u WHERE u.usuario_id = $1
+    `, [adultoId]);
+    adultLat = adultoLoc.rows[0]?.latitud ?? null;
+    adultLon = adultoLoc.rows[0]?.longitud ?? null;
+  }
 
   const params = [adultoId];
   let extra = '';
@@ -68,7 +70,7 @@ async function pickNearestNow(adultoId, excludedCuidadorIds = []) {
   return scored[0] || null;
 }
 
-// ===== Timers (countdown) =====
+// ===== Timers (countdown por alerta) =====
 const timers = new Map();
 function startCountdown(alertaId, seconds) {
   clearCountdown(alertaId);
@@ -80,47 +82,58 @@ function clearCountdown(alertaId) {
   if (t) { clearTimeout(t); timers.delete(alertaId); }
 }
 
-// ===== Emergencia SOLO para el adulto =====
+// ===== Emergencia SOLO al adulto =====
 async function notifyEmergencyToAdult(alertaId) {
-  // obtener adultoId de la alerta
   const { rows } = await pool.query(`SELECT usuario_id FROM alertas WHERE id=$1`, [alertaId]);
   const adultoId = rows[0]?.usuario_id;
-  // registrar evento y cerrar alerta
+
   await pool.query(
     `INSERT INTO alertas_eventos (alerta_id, evento, metadata)
-     VALUES ($1,'EMERGENCY_CALLED', $2::jsonb)`,
+     VALUES ($1,'EMERGENCY_CALLED',$2::jsonb)`,
     [alertaId, JSON.stringify({ channel: 'in_app' })]
   );
   await pool.query(`UPDATE alertas SET estado='CERRADA' WHERE id=$1`, [alertaId]);
 
-  // emitir SOLO al adulto (sala de alerta y sala de usuario)
   if (ioRef) {
     ioRef.to(`adulto_alerta:${alertaId}`).emit('alerta_emergencia', { alertaId });
     if (adultoId) ioRef.to(`adulto:${adultoId}`).emit('alerta_emergencia', { alertaId });
   }
 }
 
-// ===== Crear alerta y notificar al más cercano actual =====
-export async function crearAlertaRT({ adultoId, tipo='SOS', descripcion=null, countdownSeg=30 }) {
+// ===== Crear alerta (con coords) y notificar al más cercano =====
+export async function crearAlertaRT({
+  adultoId,
+  tipo = 'SOS',
+  descripcion = null,
+  countdownSeg = 30,
+  latitud = null,
+  longitud = null,
+  precision_metros = null
+}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     const { rows: alertaRows } = await client.query(
-      `INSERT INTO alertas (usuario_id, tipo, descripcion, countdown_seg, creada_en, atendida, estado)
-       VALUES ($1,$2,$3,$4,NOW(),false,'ABIERTA')
-       RETURNING id, countdown_seg`,
-      [adultoId, tipo, descripcion, countdownSeg]
+      `INSERT INTO alertas (usuario_id, tipo, descripcion, countdown_seg, creada_en, atendida, estado, latitud, longitud, precision_metros)
+       VALUES ($1,$2,$3,$4,NOW(),false,'ABIERTA',$5,$6,$7)
+       RETURNING id, countdown_seg, latitud, longitud, precision_metros`,
+      [adultoId, tipo, descripcion, countdownSeg, latitud, longitud, precision_metros]
     );
     const alerta = alertaRows[0];
 
     await client.query(
       `INSERT INTO alertas_eventos (alerta_id, evento, metadata)
-       VALUES ($1,'CREATED', $2::jsonb)`,
-      [alerta.id, JSON.stringify({ adultoId, tipo })]
+       VALUES ($1,'CREATED',$2::jsonb)`,
+      [alerta.id, JSON.stringify({ adultoId, tipo, latitud: alerta.latitud, longitud: alerta.longitud })]
     );
 
-    const nearest = await pickNearestNow(adultoId, []);
+    const nearest = await pickNearestNow({
+      adultoId,
+      adultLat: alerta.latitud ?? null,
+      adultLon: alerta.longitud ?? null,
+      excludedCuidadorIds: []
+    });
 
     if (nearest) {
       await client.query(
@@ -131,7 +144,7 @@ export async function crearAlertaRT({ adultoId, tipo='SOS', descripcion=null, co
       );
       await client.query(
         `INSERT INTO alertas_eventos (alerta_id, evento, metadata)
-         VALUES ($1,'NOTIFIED', $2::jsonb)`,
+         VALUES ($1,'NOTIFIED',$2::jsonb)`,
         [alerta.id, JSON.stringify({ cuidador_id: nearest.cuidador_id, orden: 1 })]
       );
     }
@@ -141,9 +154,14 @@ export async function crearAlertaRT({ adultoId, tipo='SOS', descripcion=null, co
     if (ioRef) {
       ioRef.to(`adulto:${adultoId}`).emit('alerta_creada', { alertaId: alerta.id, countdown: alerta.countdown_seg });
       if (nearest) {
-        ioRef.to(`cuidador:${nearest.cuidador_id}`).emit('alerta_nueva', { alertaId: alerta.id, orden: 1 });
+        ioRef.to(`cuidador:${nearest.cuidador_id}`).emit('alerta_nueva', {
+          alertaId: alerta.id,
+          orden: 1,
+          latitud: alerta.latitud,
+          longitud: alerta.longitud,
+          precision_metros: alerta.precision_metros,
+        });
       } else {
-        // sin cuidadores vinculados → emergencia directa (en-app)
         await notifyEmergencyToAdult(alerta.id);
       }
     }
@@ -159,13 +177,12 @@ export async function crearAlertaRT({ adultoId, tipo='SOS', descripcion=null, co
   }
 }
 
-// ===== Expiración del countdown: derivar al siguiente más cercano =====
+// ===== Expiración del countdown: derivar al siguiente =====
 async function onCountdownExpired(alertaId) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // expira la asignación activa
     await client.query(
       `UPDATE alertas_asignaciones
          SET estado='EXPIRADA', respondida_en=NOW()
@@ -173,50 +190,63 @@ async function onCountdownExpired(alertaId) {
       [alertaId]
     );
 
-    // datos base
     const { rows: aRows } = await client.query(
-      `SELECT usuario_id, countdown_seg FROM alertas WHERE id=$1`,
+      `SELECT usuario_id, countdown_seg, latitud, longitud FROM alertas WHERE id=$1`,
       [alertaId]
     );
-    const adultoId = aRows[0].usuario_id;
-    const countdownSeg = aRows[0].countdown_seg;
+    const adultoId   = aRows[0].usuario_id;
+    const countdown  = aRows[0].countdown_seg;
+    const adultLat   = aRows[0].latitud ?? null;
+    const adultLon   = aRows[0].longitud ?? null;
 
-    // excluidos: todos los ya intentados en esta alerta
     const { rows: excl } = await client.query(
       `SELECT cuidador_id FROM alertas_asignaciones WHERE alerta_id=$1`,
       [alertaId]
     );
     const excluded = excl.map(x => x.cuidador_id);
 
-    const nearest = await pickNearestNow(adultoId, excluded);
+    const nearest = await pickNearestNow({
+      adultoId,
+      adultLat,
+      adultLon,
+      excludedCuidadorIds: excluded
+    });
 
     if (nearest) {
       const { rows: ord } = await client.query(
         `SELECT COALESCE(MAX(orden),0)+1 AS next FROM alertas_asignaciones WHERE alerta_id=$1`,
         [alertaId]
       );
+      const nextOrden = ord[0].next;
+
       await client.query(
         `INSERT INTO alertas_asignaciones
          (alerta_id, cuidador_id, orden, estado, distancia_m, notificada_en)
          VALUES ($1,$2,$3,'NOTIFICADA',$4,NOW())`,
-        [alertaId, nearest.cuidador_id, ord[0].next, nearest.distancia_m]
+        [alertaId, nearest.cuidador_id, nextOrden, nearest.distancia_m]
       );
       await client.query(
         `INSERT INTO alertas_eventos (alerta_id, evento, metadata)
-         VALUES ($1,'FORWARDED', $2::jsonb)`,
-        [alertaId, JSON.stringify({ to: nearest.cuidador_id, orden: ord[0].next })]
+         VALUES ($1,'FORWARDED',$2::jsonb)`,
+        [alertaId, JSON.stringify({ to: nearest.cuidador_id, orden: nextOrden })]
       );
 
       await client.query('COMMIT');
 
       if (ioRef) {
-        ioRef.to(`cuidador:${nearest.cuidador_id}`).emit('alerta_nueva', { alertaId, orden: ord[0].next });
-        ioRef.to(`adulto_alerta:${alertaId}`).emit('derivada_siguiente', { alertaId });
+        ioRef.to(`cuidador:${nearest.cuidador_id}`).emit('alerta_nueva', {
+          alertaId,
+          orden: nextOrden,
+          latitud: adultLat,
+          longitud: adultLon,
+          precision_metros: null,
+        });
+        ioRef.to(`adulto_alerta:${alertaId}`).emit('derivada_siguiente', { alertaId, nextOrden });
       }
-      startCountdown(alertaId, countdownSeg);
+      startCountdown(alertaId, countdown);
     } else {
       await client.query('COMMIT');
-      await notifyEmergencyToAdult(alertaId); // en-app y cierre
+      await notifyEmergencyToAdult(alertaId);
     }
   } catch (e) {
     await client.query('ROLLBACK');
@@ -239,9 +269,10 @@ export async function aceptarAlerta({ alertaId, cuidadorId }) {
   clearCountdown(alertaId);
   await pool.query(
     `INSERT INTO alertas_eventos (alerta_id, evento, metadata)
-     VALUES ($1,'ACCEPTED', $2::jsonb)`,
+     VALUES ($1,'ACCEPTED',$2::jsonb)`,
     [alertaId, JSON.stringify({ cuidador_id: cuidadorId })]
   );
+
   if (ioRef) ioRef.to(`adulto_alerta:${alertaId}`).emit('cuidador_en_camino', { alertaId, cuidadorId });
   return true;
 }
@@ -255,7 +286,7 @@ export async function derivarAlerta({ alertaId, cuidadorId }) {
   );
   if (!rowCount) return { forwarded: false };
   clearCountdown(alertaId);
-  await onCountdownExpired(alertaId); // reusa el flujo
+  await onCountdownExpired(alertaId);
   return { forwarded: true };
 }
 
@@ -272,7 +303,7 @@ export async function completarAlerta({ alertaId, cuidadorId }) {
     );
     await client.query(
       `INSERT INTO alertas_eventos (alerta_id, evento, metadata)
-       VALUES ($1,'COMPLETED', $2::jsonb)`,
+       VALUES ($1,'COMPLETED',$2::jsonb)`,
       [alertaId, JSON.stringify({ by: cuidadorId })]
     );
     await client.query('COMMIT');

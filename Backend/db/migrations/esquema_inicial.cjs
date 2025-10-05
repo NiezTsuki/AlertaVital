@@ -1,13 +1,13 @@
-//Ejecutar en la terminal:
-//npx knex migrate:latest --knexfile knexfile.cjs
-//npx knex migrate:rollback --knexfile knexfile.cjs
+// Ejecutar:
+// npx knex migrate:latest --knexfile knexfile.cjs
+// npx knex migrate:rollback --knexfile knexfile.cjs
 
 exports.up = async function up(knex) {
-  // 1) Extensiones necesarias
+  // 1) Extensiones
   await knex.raw('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
   await knex.raw('CREATE EXTENSION IF NOT EXISTS citext;');
 
-  // 2) ENUMS (crear solo si no existen)
+  // 2) ENUMS
   await knex.raw(`
     DO $$
     BEGIN
@@ -27,9 +27,8 @@ exports.up = async function up(knex) {
     END$$;
   `);
 
-  // 3) Tablas base
-  const hasUsuarios = await knex.schema.hasTable('usuarios');
-  if (!hasUsuarios) {
+  // 3) USUARIOS
+  if (!(await knex.schema.hasTable('usuarios'))) {
     await knex.schema.createTable('usuarios', (t) => {
       t.uuid('id').primary().defaultTo(knex.raw('uuid_generate_v4()'));
       t.specificType('rol', 'user_role').notNullable();
@@ -43,8 +42,8 @@ exports.up = async function up(knex) {
     });
   }
 
-  const hasCuidadores = await knex.schema.hasTable('cuidadores');
-  if (!hasCuidadores) {
+  // 4) CUIDADORES (vínculos)
+  if (!(await knex.schema.hasTable('cuidadores'))) {
     await knex.schema.createTable('cuidadores', (t) => {
       t.uuid('id').primary().defaultTo(knex.raw('uuid_generate_v4()'));
       t.uuid('adulto_id').notNullable()
@@ -58,38 +57,39 @@ exports.up = async function up(knex) {
     });
   }
 
-  const hasUbicaciones = await knex.schema.hasTable('ubicaciones');
-  if (!hasUbicaciones) {
+  // 5) UBICACIONES (última conocida por usuario)
+  if (!(await knex.schema.hasTable('ubicaciones'))) {
     await knex.schema.createTable('ubicaciones', (t) => {
       t.uuid('id').primary().defaultTo(knex.raw('uuid_generate_v4()'));
       t.uuid('usuario_id').notNullable()
         .references('id').inTable('usuarios').onDelete('CASCADE');
-      t.double('latitud').notNullable();
-      t.double('longitud').notNullable();
-      t.double('precision_metros');
+      t.specificType('latitud', 'double precision').notNullable();
+      t.specificType('longitud', 'double precision').notNullable();
+      t.specificType('precision_metros', 'double precision');
       t.timestamp('detectado_en', { useTz: true }).notNullable().defaultTo(knex.fn.now());
       t.index(['usuario_id', 'detectado_en']);
     });
   }
 
-  // 4) ALERTAS (padre)
-  const hasAlertas = await knex.schema.hasTable('alertas');
-  if (!hasAlertas) {
+  // 6) ALERTAS (incluye snapshot de coords del adulto)
+  if (!(await knex.schema.hasTable('alertas'))) {
     await knex.schema.createTable('alertas', (t) => {
       t.uuid('id').primary().defaultTo(knex.raw('uuid_generate_v4()'));
       t.uuid('usuario_id').notNullable()
-        .references('id').inTable('usuarios').onDelete('CASCADE'); // adulto mayor que emite
+        .references('id').inTable('usuarios').onDelete('CASCADE'); // adulto emisor
       t.text('tipo').notNullable(); // 'CAIDA','SOS','ZONA_SEGURA'
       t.text('descripcion');
       t.timestamp('creada_en', { useTz: true }).notNullable().defaultTo(knex.fn.now());
       t.boolean('atendida').notNullable().defaultTo(false);
-
-      // Campos operativos para el flujo (countdown/estado)
       t.integer('countdown_seg').defaultTo(30);
       t.text('estado').defaultTo('ABIERTA'); // 'ABIERTA','CANCELADA','CERRADA'
+
+      // coords snapshot
+      t.specificType('latitud', 'double precision');
+      t.specificType('longitud', 'double precision');
+      t.specificType('precision_metros', 'double precision');
     });
 
-    // Checks e índices
     await knex.raw(
       `ALTER TABLE alertas
          ADD CONSTRAINT alertas_tipo_check
@@ -100,27 +100,30 @@ exports.up = async function up(knex) {
          ADD CONSTRAINT alertas_estado_chk
          CHECK (estado IN ('ABIERTA','CANCELADA','CERRADA'));`
     );
+
     await knex.schema.alterTable('alertas', (t) => {
       t.index(['usuario_id'], 'alertas_usuario_idx');
       t.index(['creada_en'], 'alertas_creada_idx');
       t.index(['estado'], 'alertas_estado_idx');
       t.index(['tipo'], 'alertas_tipo_idx');
     });
+    await knex.raw(`CREATE INDEX IF NOT EXISTS alertas_lat_lon_idx ON alertas (latitud, longitud);`);
   }
 
-  // 5) ASIGNACIONES de alertas (depende de alertas)
-  const hasAsign = await knex.schema.hasTable('alertas_asignaciones');
-  if (!hasAsign) {
+  // 7) ASIGNACIONES (orden y estado por cuidador)
+  if (!(await knex.schema.hasTable('alertas_asignaciones'))) {
     await knex.schema.createTable('alertas_asignaciones', (t) => {
       t.uuid('id').primary().defaultTo(knex.raw('uuid_generate_v4()'));
       t.uuid('alerta_id').notNullable()
         .references('id').inTable('alertas').onDelete('CASCADE');
       t.uuid('cuidador_id').notNullable()
         .references('id').inTable('usuarios').onDelete('CASCADE');
-      t.integer('orden').notNullable().defaultTo(1); // 1,2,3...
+      t.integer('orden').notNullable().defaultTo(1);
       t.specificType('estado', 'asignacion_estado').notNullable().defaultTo('PENDIENTE');
       t.timestamp('notificada_en', { useTz: true });
       t.timestamp('respondida_en', { useTz: true });
+
+      // features / métricas
       t.decimal('distancia_m', 12, 3);
       t.decimal('ml_score', 10, 6);
       t.text('ml_model');
@@ -137,9 +140,8 @@ exports.up = async function up(knex) {
     });
   }
 
-  // 6) EVENTOS / HISTORIAL de alertas
-  const hasEventos = await knex.schema.hasTable('alertas_eventos');
-  if (!hasEventos) {
+  // 8) EVENTOS (historial)
+  if (!(await knex.schema.hasTable('alertas_eventos'))) {
     await knex.schema.createTable('alertas_eventos', (t) => {
       t.uuid('id').primary().defaultTo(knex.raw('uuid_generate_v4()'));
       t.uuid('alerta_id').notNullable()
@@ -154,17 +156,44 @@ exports.up = async function up(knex) {
     });
   }
 
-  // 7) Zonas seguras
-  const hasZonas = await knex.schema.hasTable('zonas_seguras');
-  if (!hasZonas) {
+  // 9) TRAZAS por alerta (para mapas y ML)
+  if (!(await knex.schema.hasTable('alertas_posiciones'))) {
+    await knex.schema.createTable('alertas_posiciones', (t) => {
+      t.uuid('id').primary().defaultTo(knex.raw('uuid_generate_v4()'));
+      t.uuid('alerta_id').notNullable()
+        .references('id').inTable('alertas').onDelete('CASCADE');
+      t.uuid('usuario_id').notNullable()
+        .references('id').inTable('usuarios').onDelete('CASCADE');
+      t.text('rol').notNullable(); // 'ADULTO_MAYOR' | 'CUIDADOR'
+      t.specificType('latitud', 'double precision').notNullable();
+      t.specificType('longitud', 'double precision').notNullable();
+      t.specificType('precision_metros', 'double precision');
+      t.timestamp('capturada_en', { useTz: true }).notNullable().defaultTo(knex.fn.now());
+    });
+
+    await knex.raw(`
+      ALTER TABLE alertas_posiciones
+      ADD CONSTRAINT alertas_posiciones_rol_chk
+      CHECK (rol IN ('ADULTO_MAYOR','CUIDADOR'));
+    `);
+
+    await knex.schema.alterTable('alertas_posiciones', (t) => {
+      t.index(['alerta_id', 'capturada_en'], 'pos_alerta_time_idx');
+      t.index(['usuario_id', 'capturada_en'], 'pos_user_time_idx');
+      t.index(['rol'], 'pos_rol_idx');
+    });
+  }
+
+  // 10) ZONAS SEGURAS
+  if (!(await knex.schema.hasTable('zonas_seguras'))) {
     await knex.schema.createTable('zonas_seguras', (t) => {
       t.uuid('id').primary().defaultTo(knex.raw('uuid_generate_v4()'));
       t.uuid('usuario_id').notNullable()
         .references('id').inTable('usuarios').onDelete('CASCADE');
       t.text('nombre').notNullable();
-      t.double('latitud').notNullable();
-      t.double('longitud').notNullable();
-      t.double('radio_metros').notNullable();
+      t.specificType('latitud', 'double precision').notNullable();
+      t.specificType('longitud', 'double precision').notNullable();
+      t.specificType('radio_metros', 'double precision').notNullable();
       t.timestamp('creado_en', { useTz: true }).notNullable().defaultTo(knex.fn.now());
     });
     await knex.raw(`ALTER TABLE zonas_seguras
@@ -175,9 +204,8 @@ exports.up = async function up(knex) {
     });
   }
 
-  // 8) Historial médico
-  const hasHistMed = await knex.schema.hasTable('historial_medico');
-  if (!hasHistMed) {
+  // 11) HISTORIAL MÉDICO
+  if (!(await knex.schema.hasTable('historial_medico'))) {
     await knex.schema.createTable('historial_medico', (t) => {
       t.uuid('id').primary().defaultTo(knex.raw('uuid_generate_v4()'));
       t.uuid('usuario_id').notNullable()
@@ -195,11 +223,12 @@ exports.up = async function up(knex) {
 };
 
 exports.down = async function down(knex) {
-  // Bajar en orden inverso por dependencias
-  const dropIf = (name) => knex.schema.hasTable(name).then((exists) => exists && knex.schema.dropTable(name));
+  const dropIf = (name) =>
+    knex.schema.hasTable(name).then((exists) => exists && knex.schema.dropTable(name));
 
   await dropIf('historial_medico');
   await dropIf('zonas_seguras');
+  await dropIf('alertas_posiciones');
   await dropIf('alertas_eventos');
   await dropIf('alertas_asignaciones');
   await dropIf('alertas');
@@ -207,7 +236,7 @@ exports.down = async function down(knex) {
   await dropIf('cuidadores');
   await dropIf('usuarios');
 
-  // Borrar ENUMS solo si ya no hay columnas usándolos
+  // Borrar ENUMS
   await knex.raw(`
     DO $$
     BEGIN

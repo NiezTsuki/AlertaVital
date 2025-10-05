@@ -5,3 +5,12 @@
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
 </manifest>
+
+<!-- Ubicación precisa/aproximada -->
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+
+<!-- (Opcional) Ubicación en segundo plano si luego la necesitas -->
+<!-- <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/> -->
+
+<uses-feature android:name="android.hardware.location.gps" android:required="false"/>
