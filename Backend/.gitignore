@@ -33,3 +33,7 @@ error.log
 .idea/
 .DS_Store
 *.swp
+.vercel
+.env*.local
+
+/src/generated/prisma

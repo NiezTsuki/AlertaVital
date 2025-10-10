@@ -2,7 +2,8 @@ import pkg from 'pg';
 import { config } from '../config/env.js';
 const { Pool } = pkg;
 
-const connString = config.databaseUrl;
+// Usamos DIRECT_URL porque tiene el formato estándar que la librería 'pg' entiende
+const connString = process.env.DIRECT_URL; 
 let pool;
 
 if (connString) {
