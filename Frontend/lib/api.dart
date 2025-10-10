@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class Api {
-  static const String baseUrl = 'http://localhost:3000'; // ajusta si usas emulador/dispositivo real
+  static const String baseUrl = 'https://alerta-vital-nine.vercel.app'; // ajusta si usas emulador/dispositivo real
 
   /// ---------- AUTENTICACIÓN ----------
   static Future<Map<String, dynamic>> login(String correo, String contrasena) async {
