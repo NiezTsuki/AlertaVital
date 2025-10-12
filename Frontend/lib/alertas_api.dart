@@ -20,8 +20,8 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 class AlertasApi {
   // ===== Config =====
-  static String _baseUrl =
-      const String.fromEnvironment('API_BASE', defaultValue: 'http://10.0.2.2:3000');
+  static String _baseUrl = const String.fromEnvironment('API_BASE',
+    defaultValue: 'https://alerta-vital-nine.vercel.app'); // <-- TU URL DE VERCEL AQUÍ
   static String? _token;
 
   /// Configura/actualiza baseUrl y token.
