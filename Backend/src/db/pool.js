@@ -1,14 +1,22 @@
 import pkg from 'pg';
-import { config } from '../config/env.js';
 const { Pool } = pkg;
 
-// Usamos DIRECT_URL porque tiene el formato estándar que la librería 'pg' entiende
-const connString = process.env.DIRECT_URL; 
+// CAMBIO 1: Usamos DATABASE_URL, que es la variable estándar y la que ya tienes en Vercel.
+const connString = process.env.DATABASE_URL;
 let pool;
 
 if (connString) {
-  pool = new Pool({ connectionString: connString });
+  // Si la variable de conexión existe (como en Vercel), la usamos.
+  pool = new Pool({
+    connectionString: connString,
+    // CAMBIO 2: Añadimos SSL. Es OBLIGATORIO para bases de datos en la nube como Vercel Postgres.
+    ssl: {
+      rejectUnauthorized: false,
+    },
+  });
 } else {
+  // Este bloque ahora solo se usará para desarrollo local si no tienes un .env
+  console.warn("ADVERTENCIA: No se encontró DATABASE_URL. Conectando a la base de datos local.");
   pool = new Pool({
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || 'postgres',
