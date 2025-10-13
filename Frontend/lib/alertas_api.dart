@@ -176,10 +176,16 @@ class AlertasApi {
     print('🔧 [DEBUG SOCKET] Configurando nueva conexión para el origen: $origin');
 
     try {
-        final builder = IO.OptionBuilder()
-            .setTransports(['websocket'])
-            .disableAutoConnect()
-            .setAuth({'token': jwt});
+        // ===================== INICIO DE LA SOLUCIÓN =====================
+        // Se elimina .setTransports(['websocket']) para permitir que el cliente
+        // use el método de conexión por defecto (polling -> websocket upgrade),
+        // que es compatible con el servidor en Vercel.
+        // =================================================================
+        // ...
+final builder = IO.OptionBuilder()
+    .disableAutoConnect()
+    .setAuth({'token': jwt});
+// ...
 
         final opts = builder.build();
         final s = IO.io(origin, opts);

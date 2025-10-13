@@ -14,6 +14,7 @@ import { setAlertsIO } from './services/alertas.service.js';
 import ubicacionesRoutes from './routes/ubicaciones.routes.js';
 import alertasPosRoutes from './routes/alertas_posiciones.routes.js';
 
+// 1. Configura la aplicación Express como antes
 const app = express();
 app.use(helmet());
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE','PATCH'] }));
@@ -24,54 +25,37 @@ app.use(morgan('dev'));
 app.use('/api', cuidadoresRoutes);
 app.use('/api', authRoutes);
 app.use('/auth', authRoutes);
-// Ubicaciones
 app.use('/api', ubicacionesRoutes);
 app.use('/api', alertasPosRoutes);
-// NUEVO: alertas (SOS, aceptar, derivar, completar)
 app.use('/api', alertasRoutes);
-
 app.get('/health', (_req, res) => res.json({ ok: true }));
-
-// Nota: evitamos duplicar /auth (ya está en /api)
-// app.use('/auth', authRoutes);
-
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
-// HTTP server + Socket.IO
+// 2. Crea el servidor HTTP y el servidor de Socket.IO
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST'] },
-  transports: ['polling', 'websocket'],
-
-  // ===================== INICIO DE LA SOLUCIÓN FINAL =====================
-  // Esta línea le dice al servidor v4 que acepte conexiones de clientes
-  // que usan el protocolo de transporte v3 (Engine.IO v3), como la 
-  // librería socket_io_client de Flutter. Esto resuelve el error 400.
-  allowEIO3: true 
-  // ====================== FIN DE LA SOLUCIÓN FINAL =======================
+  transports: ['websocket', 'polling'], // Mantenemos ambos para máxima compatibilidad
+  allowEIO3: true // Crucial para la compatibilidad con el cliente de Flutter
 });
 
-// Auth JWT para sockets (usa tu middleware)
+// 3. Aplica el middleware y la lógica de Socket.IO
 io.use(authMiddlewareSocket);
 
-// Salas por rol y por alerta
 io.on('connection', (socket) => {
-  const user = socket.user; // { sub, rol }
+  const user = socket.user;
   if (!user) return socket.disconnect(true);
 
-  // Salas por usuario
   if (user.rol === 'ADULTO_MAYOR') socket.join(`adulto:${user.sub}`);
   if (user.rol === 'CUIDADOR')     socket.join(`cuidador:${user.sub}`);
 
-  // Sala por alerta cuando el adulto abre el detalle
   socket.on('join_alerta', ({ alertaId }) => {
     if (alertaId) socket.join(`adulto_alerta:${alertaId}`);
   });
 });
 
-// Inyecta io al servicio de alertas
 setAlertsIO(io);
 
-server.listen(config.port, () =>
-  console.log(`API + Sockets escuchando en http://localhost:${config.port}`)
-);
+// 4. ELIMINA server.listen(...) Y EXPORTA EL SERVIDOR
+// Vercel tomará este objeto y lo manejará correctamente.
+export default server;
