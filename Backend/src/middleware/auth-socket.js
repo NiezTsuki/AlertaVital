@@ -23,11 +23,19 @@ export function authMiddlewareSocket(socket, next) {
 
     if (!token) return next(new Error('No token'));
 
+    // ===================== INICIO CÓDIGO DE DEPURACIÓN =====================
+    // Esta línea es crucial. Se ejecutará cada vez que un socket intente conectar.
+    // Nos dirá el secreto que el servidor está USANDO REALMENTE para la verificación.
+    console.log(`[DEBUG AUTH SOCKET] Verificando token. El secreto en uso es: "${config.jwtSecret}"`);
+    // ====================== FIN CÓDIGO DE DEPURACIÓN =======================
+
     const payload = jwt.verify(token, config.jwtSecret);
     // Esperamos que el JWT lleve { sub, rol }
     socket.user = { sub: payload.sub, rol: payload.rol };
     return next();
   } catch (e) {
+    // Si la verificación falla, también lo registramos.
+    console.error('[DEBUG AUTH SOCKET] ERROR: La verificación del token falló.', e.message);
     return next(new Error('Unauthorized'));
   }
 }
