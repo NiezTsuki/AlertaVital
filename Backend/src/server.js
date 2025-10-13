@@ -14,7 +14,6 @@ import { setAlertsIO } from './services/alertas.service.js';
 import ubicacionesRoutes from './routes/ubicaciones.routes.js';
 import alertasPosRoutes from './routes/alertas_posiciones.routes.js';
 
-// 1. Configura la aplicación Express como antes
 const app = express();
 app.use(helmet());
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE','PATCH'] }));
@@ -25,37 +24,51 @@ app.use(morgan('dev'));
 app.use('/api', cuidadoresRoutes);
 app.use('/api', authRoutes);
 app.use('/auth', authRoutes);
+// Ubicaciones
 app.use('/api', ubicacionesRoutes);
 app.use('/api', alertasPosRoutes);
+// NUEVO: alertas (SOS, aceptar, derivar, completar)
 app.use('/api', alertasRoutes);
+
 app.get('/health', (_req, res) => res.json({ ok: true }));
+
+// Nota: evitamos duplicar /auth (ya está en /api)
+// app.use('/auth', authRoutes);
+
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
-// 2. Crea el servidor HTTP y el servidor de Socket.IO
+// HTTP server + Socket.IO
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST'] },
-  transports: ['websocket', 'polling'], // Mantenemos ambos para máxima compatibilidad
-  allowEIO3: true // Crucial para la compatibilidad con el cliente de Flutter
+  // ===================== INICIO DE LA SOLUCIÓN =====================
+  // AÑADIDO: Especifica explícitamente los transportes permitidos.
+  // Esto soluciona el error "Transport unknown" en Vercel.
+  transports: ['polling', 'websocket']
+  // ====================== FIN DE LA SOLUCIÓN =======================
 });
 
-// 3. Aplica el middleware y la lógica de Socket.IO
+// Auth JWT para sockets (usa tu middleware)
 io.use(authMiddlewareSocket);
 
+// Salas por rol y por alerta
 io.on('connection', (socket) => {
-  const user = socket.user;
+  const user = socket.user; // { sub, rol }
   if (!user) return socket.disconnect(true);
 
+  // Salas por usuario
   if (user.rol === 'ADULTO_MAYOR') socket.join(`adulto:${user.sub}`);
   if (user.rol === 'CUIDADOR')     socket.join(`cuidador:${user.sub}`);
 
+  // Sala por alerta cuando el adulto abre el detalle
   socket.on('join_alerta', ({ alertaId }) => {
     if (alertaId) socket.join(`adulto_alerta:${alertaId}`);
   });
 });
 
+// Inyecta io al servicio de alertas
 setAlertsIO(io);
 
-// 4. ELIMINA server.listen(...) Y EXPORTA EL SERVIDOR
-// Vercel tomará este objeto y lo manejará correctamente.
-export default server;
+server.listen(config.port, () =>
+  console.log(`API + Sockets escuchando en http://localhost:${config.port}`)
+);
