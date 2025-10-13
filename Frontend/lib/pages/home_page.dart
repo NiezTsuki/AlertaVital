@@ -86,10 +86,14 @@ class _HomePageState extends State<HomePage> {
     super.didChangeDependencies();
     final auth = context.watch<AuthState>();
 
+    // ===== DEBUGGING CODE START =====
+    print('🟡 [DEBUG HOME] didChangeDependencies se disparó. Estado actual: _isSocketInitialized=$_isSocketInitialized, auth.token=${auth.token != null ? "presente" : "nulo"}, auth.user=${auth.user != null ? "presente" : "nulo"}');
+    // ===== DEBUGGING CODE END =====
+
     // Esta lógica asegura que el socket se conecte solo cuando
     // tengamos un token VÁLIDO y un usuario confirmado, y solo lo intente una vez.
     if (!_isSocketInitialized && auth.token != null && auth.user != null) {
-      print("✅ AuthState confirmado. Inicializando socket...");
+      print("✅ AuthState confirmado. Se procederá a inicializar el socket...");
       unawaited(_wireCaregiverSocket());
       setState(() {
         _isSocketInitialized = true;
@@ -133,7 +137,15 @@ class _HomePageState extends State<HomePage> {
   // ===== Socket para cuidador =====
   Future<void> _wireCaregiverSocket() async {
     final token = _token;
-    if (token == null || token.isEmpty) return;
+
+    // ===== DEBUGGING CODE START =====
+    print('🔌 [DEBUG HOME] _wireCaregiverSocket fue llamado. El token obtenido de AuthState es: "$token"');
+    // ===== DEBUGGING CODE END =====
+
+    if (token == null || token.isEmpty) {
+        print('❗️ [DEBUG HOME] Intento de conectar socket abortado porque el token es nulo/vacío en este punto.');
+        return;
+    }
 
     AlertasApi.configure(baseUrl: Api.baseUrl, token: token);
     await AlertasApi.initSocket();

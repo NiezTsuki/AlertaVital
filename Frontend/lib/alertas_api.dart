@@ -152,38 +152,61 @@ class AlertasApi {
   static Future<void> initSocket() async {
     final jwt = _token;
 
-    // =====================================================================
-    // LÍNEA DE DEPURACIÓN AÑADIDA:
-    // Revisa la consola de depuración para ver este mensaje.
-    // Te dirá si el token es nulo o válido antes de conectar.
-    // =====================================================================
-    print('💡 [SOCKET] Intentando conectar con el token: $jwt');
+    // ===== DEBUGGING CODE START =====
+    print('💡 [DEBUG SOCKET] Se ha llamado a initSocket.');
+    print('   > Token a utilizar: "$jwt"');
 
     if (jwt == null || jwt.isEmpty) {
-      print('❌ [SOCKET] ERROR: El token es nulo o vacío. No se puede conectar.');
+      print('❌ [DEBUG SOCKET] ERROR CRÍTICO: El token es nulo o está vacío. Conexión abortada.');
       return;
     }
 
-    if (_socket != null && _socket!.connected && _socketJwt == jwt) return;
+    if (_socket != null && _socket!.connected && _socketJwt == jwt) {
+        print('✅ [DEBUG SOCKET] El socket ya está conectado con el token correcto. No se requiere acción.');
+        return;
+    }
 
-    try { _socket?.dispose(); } catch (_) {}
-    _socket = null;
+    if (_socket != null) {
+        print('⏳ [DEBUG SOCKET] Desechando instancia de socket anterior...');
+        try { _socket?.dispose(); } catch (e) { print('   > Error al desechar socket anterior: $e'); }
+        _socket = null;
+    }
 
     final origin = _socketOriginFromBase(_baseUrl);
+    print('🔧 [DEBUG SOCKET] Configurando nueva conexión para el origen: $origin');
 
-    final builder = IO.OptionBuilder()
-        .setTransports(['websocket'])
-        .disableAutoConnect()
-        .setAuth({'token': jwt}); // <-- ¡Esto es vital!
+    try {
+        final builder = IO.OptionBuilder()
+            .setTransports(['websocket'])
+            .disableAutoConnect()
+            .setAuth({'token': jwt});
 
-    builder.setExtraHeaders({'Authorization': 'Bearer $jwt'});
+        final opts = builder.build();
+        final s = IO.io(origin, opts);
 
-    final opts = builder.build();
-    final s = IO.io(origin, opts);
-    s.connect();
+        // Agregamos listeners para saber exactamente qué pasa
+        s.onConnect((_) {
+            print('✅✅✅ [SOCKET EVENT] ¡Conectado exitosamente al servidor!');
+        });
+        s.onConnectError((data) {
+            print('❌❌❌ [SOCKET EVENT] Error de conexión recibido del servidor: $data');
+        });
+        s.onError((data) {
+            print('❌❌❌ [SOCKET EVENT] Error general del socket: $data');
+        });
+        s.onDisconnect((_) {
+            print('🔌 [SOCKET EVENT] Desconectado del servidor.');
+        });
 
-    _socket = s;
-    _socketJwt = jwt;
+        print('🚀 [DEBUG SOCKET] Intentando conectar ahora...');
+        s.connect();
+
+        _socket = s;
+        _socketJwt = jwt;
+    } catch (e) {
+        print('💥 [DEBUG SOCKET] Excepción catastrófica al crear el socket: $e');
+    }
+    // ===== DEBUGGING CODE END =====
   }
 
   static bool get isSocketConnected => _socket?.connected == true;
