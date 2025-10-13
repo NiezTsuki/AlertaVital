@@ -2,7 +2,12 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class Api {
-  static const String baseUrl = 'https://alerta-vital-nine.vercel.app'; // ajusta si usas emulador/dispositivo real
+  // ================= PUNTO CLAVE 1/1 =================
+  // Esta es la dirección de tu backend en la nube.
+  // Todas las peticiones HTTP estándar saldrán hacia esta URL.
+  // Asegúrate de que coincida con tu despliegue de Vercel.
+  // ===================================================
+  static const String baseUrl = 'https://alerta-vital-nine.vercel.app';
 
   /// ---------- AUTENTICACIÓN ----------
   static Future<Map<String, dynamic>> login(String correo, String contrasena) async {

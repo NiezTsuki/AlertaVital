@@ -44,6 +44,12 @@ class _HomePageState extends State<HomePage> {
   // ===== Heartbeat general de ubicación (para entrenamiento/proximidad) =====
   Timer? _hbTimer;               // heartbeat para registrar /api/ubicaciones
 
+  // ===================== INICIO DE LA SOLUCIÓN =====================
+  // NUEVA VARIABLE para controlar la inicialización del socket y evitar
+  // múltiples conexiones.
+  bool _isSocketInitialized = false;
+  // ====================== FIN DE LA SOLUCIÓN ======================
+
   // ===== Helpers de rol/credenciales =====
   bool get _esAdultoMayor {
     final auth = context.read<AuthState>();
@@ -63,11 +69,34 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    // Conecta socket si hay sesión y cablea listener para cuidadores
-    unawaited(_wireCaregiverSocket());
+    // La conexión del socket se mueve a didChangeDependencies para esperar
+    // la confirmación del token de AuthState.
+    // unawaited(_wireCaregiverSocket()); // <-- LÍNEA ELIMINADA
+
     // Arranca heartbeat de ubicación (ambos roles)
     _startHeartbeatUbicacion();
   }
+
+  // ===================== INICIO DE LA SOLUCIÓN =====================
+  /// Se añade este método del ciclo de vida.
+  /// Se ejecuta después de initState y cada vez que cambia una dependencia
+  /// (como el AuthState que obtenemos con Provider).
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final auth = context.watch<AuthState>();
+
+    // Esta lógica asegura que el socket se conecte solo cuando
+    // tengamos un token VÁLIDO y un usuario confirmado, y solo lo intente una vez.
+    if (!_isSocketInitialized && auth.token != null && auth.user != null) {
+      print("✅ AuthState confirmado. Inicializando socket...");
+      unawaited(_wireCaregiverSocket());
+      setState(() {
+        _isSocketInitialized = true;
+      });
+    }
+  }
+  // ====================== FIN DE LA SOLUCIÓN ======================
 
   @override
   void dispose() {
@@ -89,9 +118,7 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _logout() async {
     final auth = context.read<AuthState>();
-    try {
-      await (auth as dynamic).logout?.call();
-    } catch (_) {}
+    await auth.logout();
     _stopCountdown();
     _stopAdultoTrail();
     _stopHeartbeatUbicacion();

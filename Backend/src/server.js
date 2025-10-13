@@ -8,9 +8,9 @@ import { Server } from 'socket.io';
 import { config } from './config/env.js';
 import authRoutes from './routes/auth.routes.js';
 import cuidadoresRoutes from './routes/cuidadores.routes.js';
-import alertasRoutes from './routes/alertas.routes.js';     
-import { authMiddlewareSocket } from './middleware/auth-socket.js'; 
-import { setAlertsIO } from './services/alertas.service.js';       
+import alertasRoutes from './routes/alertas.routes.js';
+import { authMiddlewareSocket } from './middleware/auth-socket.js';
+import { setAlertsIO } from './services/alertas.service.js';
 import ubicacionesRoutes from './routes/ubicaciones.routes.js';
 import alertasPosRoutes from './routes/alertas_posiciones.routes.js';
 
@@ -41,6 +41,11 @@ app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST'] },
+  // ===================== INICIO DE LA SOLUCIÓN =====================
+  // AÑADIDO: Especifica explícitamente los transportes permitidos.
+  // Esto soluciona el error "Transport unknown" en Vercel.
+  transports: ['polling', 'websocket']
+  // ====================== FIN DE LA SOLUCIÓN =======================
 });
 
 // Auth JWT para sockets (usa tu middleware)
