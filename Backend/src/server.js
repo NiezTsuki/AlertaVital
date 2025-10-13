@@ -41,11 +41,14 @@ app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST'] },
-  // ===================== INICIO DE LA SOLUCIÓN =====================
-  // AÑADIDO: Especifica explícitamente los transportes permitidos.
-  // Esto soluciona el error "Transport unknown" en Vercel.
-  transports: ['polling', 'websocket']
-  // ====================== FIN DE LA SOLUCIÓN =======================
+  transports: ['polling', 'websocket'],
+
+  // ===================== INICIO DE LA SOLUCIÓN FINAL =====================
+  // Esta línea le dice al servidor v4 que acepte conexiones de clientes
+  // que usan el protocolo de transporte v3 (Engine.IO v3), como la 
+  // librería socket_io_client de Flutter. Esto resuelve el error 400.
+  allowEIO3: true 
+  // ====================== FIN DE LA SOLUCIÓN FINAL =======================
 });
 
 // Auth JWT para sockets (usa tu middleware)
