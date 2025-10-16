@@ -177,15 +177,15 @@ class AlertasApi {
 
     try {
         // ===================== INICIO DE LA SOLUCIÓN =====================
-        // Se elimina .setTransports(['websocket']) para permitir que el cliente
-        // use el método de conexión por defecto (polling -> websocket upgrade),
-        // que es compatible con el servidor en Vercel.
+        // Se ELIMINA .setTransports(['websocket']) para que el cliente use el 
+        // método de conexión por defecto (polling) que es compatible con el 
+        // entorno serverless de Vercel y así evitar el error 400.
         // =================================================================
+        final builder = IO.OptionBuilder()
+            .disableAutoConnect()
+            // LÍNEA ELIMINADA: .setTransports(['websocket']) 
+            .setAuth({'token': jwt});
         // ...
-final builder = IO.OptionBuilder()
-    .disableAutoConnect()
-    .setAuth({'token': jwt});
-// ...
 
         final opts = builder.build();
         final s = IO.io(origin, opts);

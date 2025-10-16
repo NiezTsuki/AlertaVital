@@ -36,7 +36,7 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST'] },
   // CAMBIO CLAVE: Eliminar 'polling' para evitar problemas en serverless.
-  transports: ['websocket'], 
+  transports: ['polling'], 
   allowEIO3: true // Crucial para la compatibilidad con el cliente de Flutter
 });
 
