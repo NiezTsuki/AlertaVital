@@ -176,14 +176,7 @@ class AlertasApi {
     print('🔧 [DEBUG SOCKET] Configurando nueva conexión para el origen: $origin');
 
     try {
-        // ===================== INICIO DE LA SOLUCIÓN =====================
-        // Se fuerza el transporte a ['websocket'] para que coincida con la
-        // configuración del servidor. El transporte por defecto ('polling')
-        // es incompatible con el entorno serverless de Vercel y causa los
-        // errores 400 (Bad Request).
-        // =================================================================
         final builder = IO.OptionBuilder()
-            .setTransports(['websocket']) // <-- CAMBIO CLAVE APLICADO AQUÍ
             .disableAutoConnect()
             .setAuth({'token': jwt});
 
