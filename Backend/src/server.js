@@ -35,7 +35,8 @@ app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST'] },
-  transports: ['websocket', 'polling'], // Mantenemos ambos para máxima compatibilidad
+  // CAMBIO CLAVE: Eliminar 'polling' para evitar problemas en serverless.
+  transports: ['websocket'], 
   allowEIO3: true // Crucial para la compatibilidad con el cliente de Flutter
 });
 
