@@ -35,7 +35,7 @@ app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST'] },
-  //transports: ['polling'],
+  transports: ['websocket'],
   //allowEIO3: false
 });
 
