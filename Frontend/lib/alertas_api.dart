@@ -138,7 +138,7 @@ class AlertasApi {
   static bool _isPusherInitialized = false;
 
   static Future<void> initPusher({
-    required String Key,
+    required String apiKey,
     required String cluster,
   }) async {
     if (_isPusherInitialized) return;
@@ -148,7 +148,7 @@ class AlertasApi {
     try {
       final authEndpoint = Uri.parse('$_baseUrl/auth/pusher/auth');
       await _pusher.init(
-        apiKey: Key,
+        apiKey: apiKey,
         cluster: cluster,
         onConnectionStateChange: (currentState, previousState) => print("🔌 [PUSHER] Estado: $currentState"),
         onError: (message, code, error) => print("❌ [PUSHER] Error: $message, code: $code, error: $error"),
