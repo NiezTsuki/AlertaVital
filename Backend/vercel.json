@@ -1,13 +1,13 @@
 {
   "functions": {
-    "api/server.js": {
+    "/server.js": {
       "maxDuration": 300
     }
   },
   "rewrites": [
     {
       "source": "/socket.io/:path*",
-      "destination": "/api/server.js"
+      "destination": "/server.js"
     }
   ]
 }
