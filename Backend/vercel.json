@@ -6,7 +6,11 @@
   },
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/socket.io/:path*",
+      "destination": "/src/server.js"
+    },
+    {
+      "source": "/api/:path*",
       "destination": "/src/server.js"
     }
   ]
