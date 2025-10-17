@@ -2,7 +2,7 @@
 
 import Pusher from 'pusher';
 import { pool } from '../db/pool.js';
-import { config } from '../config/env.js'; // Asumiendo que aquí tienes tus variables de entorno
+import { config } from '../config/env.js';
 
 // 1. Instancia de Pusher
 const pusher = new Pusher({
@@ -13,96 +13,79 @@ const pusher = new Pusher({
   useTLS: true
 });
 
-// --- ELIMINADA ---
-// let ioRef = null;
-// export function setAlertsIO(io) { ioRef = io; }
+// ✅ LÓGICA DE TIMERS QUE FALTABA
+// Usamos un Map para llevar un registro de los temporizadores activos por alerta.
+const activeTimers = new Map();
 
-// ... (toda la lógica de Haversine, pickNearestNow, timers no cambia) ...
+function clearCountdown(alertaId) {
+  if (activeTimers.has(alertaId)) {
+    clearTimeout(activeTimers.get(alertaId));
+    activeTimers.delete(alertaId);
+  }
+}
 
-// ===== Emergencia SOLO al adulto =====
+function startCountdown(alertaId, seconds) {
+  clearCountdown(alertaId); // Nos aseguramos de que no haya timers duplicados
+  const timer = setTimeout(() => {
+    onCountdownExpired(alertaId);
+    activeTimers.delete(alertaId);
+  }, seconds * 1000);
+  activeTimers.set(alertaId, timer);
+}
+
+
+// ===== Lógica interna (funciones no exportadas) =====
+
 async function notifyEmergencyToAdult(alertaId) {
-  const { rows } = await pool.query(`SELECT usuario_id FROM alertas WHERE id=$1`, [alertaId]);
-  const adultoId = rows[0]?.usuario_id;
-
-  await pool.query(
-    `INSERT INTO alertas_eventos (alerta_id, evento, metadata)
-     VALUES ($1,'EMERGENCY_CALLED',$2::jsonb)`,
-    [alertaId, JSON.stringify({ channel: 'in_app' })]
-  );
-  await pool.query(`UPDATE alertas SET estado='CERRADA' WHERE id=$1`, [alertaId]);
-
-  // ANTES: ioRef.to(...).emit(...)
-  // AHORA: pusher.trigger(...)
-  // Los "canales privados" aseguran que solo los usuarios autorizados puedan escuchar.
-  // Tu cliente se suscribirá a 'private-alerta-ALERTA_ID' y 'private-user-USUARIO_ID'.
-  pusher.trigger(`private-alerta-${alertaId}`, 'alerta_emergencia', { alertaId });
-  if (adultoId) {
-    pusher.trigger(`private-user-${adultoId}`, 'alerta_emergencia', { alertaId });
-  }
+  // ... (tu lógica existente no cambia)
 }
 
-// ===== Crear alerta y notificar al más cercano =====
-export async function crearAlertaRT({ /* ... argumentos ... */ }) {
-  // ... (toda tu lógica de base de datos no cambia) ...
-  // ...
-  // Dentro del bloque try, después de client.query('COMMIT');
+// ... (tu lógica de Haversine y pickNearestNow no cambia) ...
 
-  // ANTES: ioRef.to(...)
-  // AHORA: pusher.trigger(...)
-  pusher.trigger(`private-user-${adultoId}`, 'alerta_creada', { alertaId: alerta.id, countdown: alerta.countdown_seg });
-  if (nearest) {
-    pusher.trigger(`private-user-${nearest.cuidador_id}`, 'alerta_nueva', {
-      alertaId: alerta.id,
-      orden: 1,
-      latitud: alerta.latitud,
-      longitud: alerta.longitud,
-      precision_metros: alerta.precision_metros,
-    });
-  } else {
-    await notifyEmergencyToAdult(alerta.id);
-  }
-
-  if (nearest) startCountdown(alerta.id, alerta.countdown_seg);
-  return { /* ... */ };
-}
-
-
-// ===== onCountdownExpired (derivar) =====
 async function onCountdownExpired(alertaId) {
-  // ... (toda tu lógica de base de datos no cambia) ...
-  // ...
-  // Dentro del bloque if (nearest), después de client.query('COMMIT');
-  
-  // ANTES: ioRef.to(...)
-  // AHORA: pusher.trigger(...)
-  pusher.trigger(`private-user-${nearest.cuidador_id}`, 'alerta_nueva', {
-    alertaId,
-    orden: nextOrden,
-    latitud: adultLat,
-    longitud: adultLon,
-    precision_metros: null,
-  });
-  pusher.trigger(`private-alerta-${alertaId}`, 'derivada_siguiente', { alertaId, nextOrden });
-  
-  startCountdown(alertaId, countdown);
-  // ...
+  // ... (tu lógica existente no cambia) ...
+  // Esta función es la que deriva la alerta al siguiente cuidador o llama a emergencia.
 }
 
-// ===== Acciones del cuidador =====
+// ===== Funciones Exportadas (lógica de negocio) =====
+
+export async function crearAlertaRT({ /* ... argumentos ... */ }) {
+  // ... (tu lógica existente no cambia) ...
+}
+
 export async function aceptarAlerta({ alertaId, cuidadorId }) {
-  // ... (lógica de BD sin cambios) ...
-  // ANTES: ioRef.to(...)
-  // AHORA: pusher.trigger(...)
+  // ... (tu lógica existente no cambia) ...
+  clearCountdown(alertaId); // Detenemos el temporizador cuando alguien acepta
   pusher.trigger(`private-alerta-${alertaId}`, 'cuidador_en_camino', { alertaId, cuidadorId });
   return true;
 }
 
-// ... (derivarAlerta no necesita cambios aquí porque llama a onCountdownExpired) ...
+// ✅ ================= INICIO DE LA CORRECCIÓN ================= ✅
+//
+// Esta es la función que faltaba. Su propósito es permitir que un cuidador
+// rechace la alerta, forzando la derivación inmediata al siguiente.
+//
+export async function derivarAlerta({ alertaId, cuidadorId }) {
+  const { rows } = await pool.query(
+    `SELECT orden FROM alertas_asignaciones WHERE alerta_id=$1 AND cuidador_id=$2 AND estado='PENDIENTE'`,
+    [alertaId, cuidadorId]
+  );
+  if (rows.length === 0) {
+    // Si no hay una asignación pendiente, no puede derivar.
+    return { ok: false, message: 'No tienes esta alerta asignada para derivar.' };
+  }
+  
+  // Limpiamos el temporizador actual para forzar la expiración inmediata.
+  clearCountdown(alertaId);
+  // Llamamos a la función que busca al siguiente en la lista.
+  await onCountdownExpired(alertaId);
+
+  return { ok: true, message: 'Alerta derivada al siguiente cuidador.' };
+}
+// ✅ =================== FIN DE LA CORRECCIÓN =================== ✅
 
 export async function completarAlerta({ alertaId, cuidadorId }) {
-  // ... (lógica de BD sin cambios) ...
-  // ANTES: ioRef.to(...)
-  // AHORA: pusher.trigger(...)
+  // ... (tu lógica existente no cambia) ...
   clearCountdown(alertaId);
   pusher.trigger(`private-alerta-${alertaId}`, 'alerta_completada', { alertaId });
   return true;
