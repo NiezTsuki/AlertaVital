@@ -1,8 +1,19 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth.js';
 import { pool } from '../db/pool.js';
+import Pusher from 'pusher';
+import { config } from '../config/env.js';
 
 const router = Router();
+
+// Instancia de Pusher
+const pusher = new Pusher({
+  appId: config.pusherAppId,
+  key: config.pusherKey,
+  secret: config.pusherSecret,
+  cluster: config.pusherCluster,
+  useTLS: true,
+});
 
 // Guardar punto de traza asociado a una alerta (adulto/cuidador)
 router.post('/alertas/:id/posicion', auth, async (req, res) => {
@@ -19,6 +30,18 @@ router.post('/alertas/:id/posicion', auth, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,NOW())`,
       [alertaId, userId, rol, latitud, longitud, precision_metros ?? null]
     );
+
+    // ✅ NOTIFICAR EN TIEMPO REAL AL MAPA
+    // Se emite un evento en el canal de la alerta con la nueva posición.
+    await pusher.trigger(`private-alerta-${alertaId}`, 'posicion_actualizada', {
+      usuario_id: userId,
+      rol: rol,
+      latitud: latitud,
+      longitud: longitud,
+      precision_metros: precision_metros,
+      capturada_en: new Date().toISOString(),
+    });
+
     res.json({ ok: true });
   } catch (e) {
     console.error(e);

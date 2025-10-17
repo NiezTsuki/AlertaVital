@@ -1,24 +1,19 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:pusher_channels_flutter/pusher_channels_flutter.dart';
 
 class AlertasApi {
-  // ===== Configuración =====
-
-  // Esta es la URL base para las peticiones HTTP de las alertas.
-  // La función `configure` puede sobreescribirla, pero este
-  // valor por defecto asegura que siempre apunte a Vercel.
+  // ===== Configuración (sin cambios) =====
   static String _baseUrl = const String.fromEnvironment('API_BASE',
       defaultValue: 'https://alerta-vital-nine.vercel.app');
   static String? _token;
 
-  /// Configura/actualiza baseUrl y token.
   static void configure({required String baseUrl, required String token}) {
     _baseUrl = baseUrl;
     _token = token;
   }
 
-  // ===== Ayudantes HTTP =====
+  // ===== Ayudantes HTTP (sin cambios) =====
   static Uri _uri(String path, [Map<String, dynamic>? q]) {
     if (!path.startsWith('/')) path = '/$path';
     final uri = Uri.parse('$_baseUrl$path');
@@ -43,8 +38,7 @@ class AlertasApi {
     throw Exception((data is Map && data['error'] != null) ? data['error'] : 'HTTP ${resp.statusCode}');
   }
 
-  // ===== Endpoints de ALERTAS =====
-
+  // ===== Endpoints de ALERTAS (sin cambios) =====
   static Future<Map<String, dynamic>> crearSOS({
     int countdown = 30,
     String tipo = 'SOS',
@@ -97,8 +91,7 @@ class AlertasApi {
     _parse(resp);
   }
 
-  // ===== Ubicaciones (entrenamiento/proximidad) =====
-
+  // ===== Ubicaciones (sin cambios) =====
   static Future<void> registrarUbicacion(double lat, double lon, {double? precision}) async {
     final resp = await http.post(
       _uri('/api/ubicaciones'),
@@ -139,96 +132,59 @@ class AlertasApi {
     if (data == null) return <dynamic>[];
     return (data as List).cast<dynamic>();
   }
+  
+  // ===== LÓGICA DE PUSHER =====
+  static final PusherChannelsFlutter _pusher = PusherChannelsFlutter.getInstance();
+  static bool _isPusherInitialized = false;
 
-  // ===== Socket.IO SOLO para alertas =====
-  static IO.Socket? _socket;
-  static String? _socketJwt;
-
-  static String _socketOriginFromBase(String base) {
-    final u = Uri.parse(base);
-    return '${u.scheme}://${u.host}${u.hasPort ? ':${u.port}' : ''}';
-  }
-
-  static Future<void> initSocket() async {
-    final jwt = _token;
-
-    // ===== DEBUGGING CODE START =====
-    print('💡 [DEBUG SOCKET] Se ha llamado a initSocket.');
-    print('   > Token a utilizar: "$jwt"');
-
-    if (jwt == null || jwt.isEmpty) {
-      print('❌ [DEBUG SOCKET] ERROR CRÍTICO: El token es nulo o está vacío. Conexión abortada.');
-      return;
-    }
-
-    if (_socket != null && _socket!.connected && _socketJwt == jwt) {
-        print('✅ [DEBUG SOCKET] El socket ya está conectado con el token correcto. No se requiere acción.');
-        return;
-    }
-
-    if (_socket != null) {
-        print('⏳ [DEBUG SOCKET] Desechando instancia de socket anterior...');
-        try { _socket?.dispose(); } catch (e) { print('   > Error al desechar socket anterior: $e'); }
-        _socket = null;
-    }
-
-    final origin = _socketOriginFromBase(_baseUrl);
-    print('🔧 [DEBUG SOCKET] Configurando nueva conexión para el origen: $origin');
+  static Future<void> initPusher({
+    required String apiKey,
+    required String cluster,
+  }) async {
+    if (_isPusherInitialized) return;
+    final token = _token;
+    if (token == null || token.isEmpty) return;
 
     try {
-        // ===================== INICIO DE LA SOLUCIÓN =====================
-        // Se fuerza el transporte a ['websocket'] para que coincida con la
-        // configuración del servidor. El transporte por defecto ('polling')
-        // es incompatible con el entorno serverless de Vercel y causa los
-        // errores 400 (Bad Request).
-        // =================================================================
-        final builder = IO.OptionBuilder()
-            .setTransports(['websocket'])
-            .disableAutoConnect()
-            .setAuth({'token': jwt});
-
-        final opts = builder.build();
-        final s = IO.io(origin, opts);
-
-        // Agregamos listeners para saber exactamente qué pasa
-        s.onConnect((_) {
-            print('✅✅✅ [SOCKET EVENT] ¡Conectado exitosamente al servidor!');
-        });
-        s.onConnectError((data) {
-            print('❌❌❌ [SOCKET EVENT] Error de conexión recibido del servidor: $data');
-        });
-        s.onError((data) {
-            print('❌❌❌ [SOCKET EVENT] Error general del socket: $data');
-        });
-        s.onDisconnect((_) {
-            print('🔌 [SOCKET EVENT] Desconectado del servidor.');
-        });
-
-        print('🚀 [DEBUG SOCKET] Intentando conectar ahora...');
-        s.connect();
-
-        _socket = s;
-        _socketJwt = jwt;
+      final authEndpoint = Uri.parse('$_baseUrl/auth/pusher/auth');
+      await _pusher.init(
+        apiKey: apiKey,
+        cluster: cluster,
+        onConnectionStateChange: (currentState, previousState) => print("🔌 [PUSHER] Estado: $currentState"),
+        onError: (message, code, error) => print("❌ [PUSHER] Error: $message, code: $code, error: $error"),
+        onAuthorizer: (channelName, socketId, options) async {
+          final resp = await http.post(
+            authEndpoint,
+            headers: _headers(),
+            body: jsonEncode({'socket_id': socketId, 'channel_name': channelName}),
+          );
+          return jsonDecode(resp.body);
+        },
+      );
+      await _pusher.connect();
+      _isPusherInitialized = true;
     } catch (e) {
-        print('💥 [DEBUG SOCKET] Excepción catastrófica al crear el socket: $e');
-    }
-    // ===== DEBUGGING CODE END =====
-  }
-
-  static bool get isSocketConnected => _socket?.connected == true;
-
-  static void joinAlerta(String alertaId) {
-    if (_socket?.connected == true) {
-      _socket!.emit('join_alerta', {'alertaId': alertaId});
+      print('💥 [PUSHER] Excepción al inicializar: $e');
+      _isPusherInitialized = false;
     }
   }
 
-  static void on(String event, void Function(dynamic) handler) => _socket?.on(event, handler);
-  static void off(String event, [void Function(dynamic)? handler]) => _socket?.off(event, handler);
+  static Future<PusherChannel> subscribeToChannel(String channelName) async {
+    PusherChannel? channel = _pusher.getChannel(channelName);
+    if (channel == null) {
+      channel = await _pusher.subscribe(channelName: channelName);
+    }
+    return channel;
+  }
+
+  static void unsubscribeFromChannel(String channelName) {
+    _pusher.unsubscribe(channelName: channelName);
+  }
 
   static void dispose() {
-    try { _socket?.dispose(); } catch (_) {}
-    _socket = null;
-    _socketJwt = null;
+    if (_isPusherInitialized) {
+      _pusher.disconnect();
+      _isPusherInitialized = false;
+    }
   }
 }

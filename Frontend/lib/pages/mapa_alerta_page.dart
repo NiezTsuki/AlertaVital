@@ -1,14 +1,16 @@
 // lib/pages/mapa_alerta_page.dart
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:pusher_channels_flutter/pusher_channels_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '/alertas_api.dart';
 
 class MapaAlertaPage extends StatefulWidget {
-  final String? alertaId;
+  final String alertaId; // Hacemos que el ID sea requerido para esta vista
   final double lat; // posición inicial del adulto (snapshot al crear SOS)
   final double lon;
 
@@ -16,7 +18,7 @@ class MapaAlertaPage extends StatefulWidget {
     super.key,
     required this.lat,
     required this.lon,
-    this.alertaId,
+    required this.alertaId,
   });
 
   @override
@@ -32,95 +34,126 @@ class _MapaAlertaPageState extends State<MapaAlertaPage> {
   LatLng? _adultoLast;
   LatLng? _cuidadorLast;
 
-  Timer? _pollTimer;
-  bool _loading = false;
-
   @override
   void initState() {
     super.initState();
-    // Fallback inicial al snapshot
     _adultoLast = LatLng(widget.lat, widget.lon);
-    _startPolling();
+    
+    // ✅ SOLUCIÓN: Reemplazamos el polling por una carga inicial + suscripción a tiempo real.
+    _fetchInitialPositions(); // Carga el historial de posiciones al entrar
+    _subscribeToPositionUpdates(); // Se suscribe para recibir nuevas posiciones
   }
 
-  @override
-  void dispose() {
-    _pollTimer?.cancel();
-    super.dispose();
-  }
-
-  void _startPolling() {
-    // Poll inmediato
-    _pollOnce();
-    // Y cada 6 segundos
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 6), (_) => _pollOnce());
-  }
-
-  Future<void> _pollOnce() async {
-    if (widget.alertaId == null || widget.alertaId!.isEmpty) return;
-    if (_loading) return;
-    _loading = true;
+  // Carga el historial de posiciones que ya existen en el servidor.
+  Future<void> _fetchInitialPositions() async {
     try {
-      final rows = await AlertasApi.getPosiciones(widget.alertaId!); // devuelve ambos roles si no pasamos ?rol
-      // Estructura esperada: [{ rol: 'ADULTO_MAYOR'|'CUIDADOR', latitud, longitud, capturada_en, ... }, ...]
-      final adulto = <LatLng>[];
-      final cuidador = <LatLng>[];
-      for (final x in rows) {
-        final rol = '${x['rol'] ?? ''}';
-        final lat = (x['latitud'] as num?)?.toDouble();
-        final lon = (x['longitud'] as num?)?.toDouble();
-        if (lat == null || lon == null) continue;
-        if (rol == 'ADULTO_MAYOR') {
-          adulto.add(LatLng(lat, lon));
-        } else if (rol == 'CUIDADOR') {
-          cuidador.add(LatLng(lat, lon));
-        }
-      }
-// El backend trae orden DESC; invertimos para que la polyline vaya en orden temporal
-final adultoOrdered   = List<LatLng>.from(adulto.reversed);
-final cuidadorOrdered = List<LatLng>.from(cuidador.reversed);
-
-setState(() {
-  _adultoTrail   = adultoOrdered.isNotEmpty   ? adultoOrdered   : _adultoTrail;
-  _cuidadorTrail = cuidadorOrdered.isNotEmpty ? cuidadorOrdered : _cuidadorTrail;
-
-  _adultoLast    = (adultoOrdered.isNotEmpty   ? adultoOrdered.last   : _adultoLast) ?? _adultoLast;
-  _cuidadorLast  = (cuidadorOrdered.isNotEmpty ? cuidadorOrdered.last : _cuidadorLast);
-});
-
-      setState(() {
-        _adultoTrail = adulto.isNotEmpty ? adulto : _adultoTrail;
-        _cuidadorTrail = cuidador.isNotEmpty ? cuidador : _cuidadorTrail;
-        _adultoLast = (adulto.isNotEmpty ? adulto.last : _adultoLast) ?? _adultoLast;
-        _cuidadorLast = (cuidador.isNotEmpty ? cuidador.last : _cuidadorLast);
-      });
+      final rows = await AlertasApi.getPosiciones(widget.alertaId);
+      _processPositionRows(rows);
     } catch (_) {
-      // Silencioso: si falla, reintenta en el próximo tick
-    } finally {
-      _loading = false;
+      // Manejo de error silencioso, la UI simplemente no mostrará el historial
     }
   }
 
-  // ---- Navegación externa
+ // ✅ Se suscribe al canal de Pusher para recibir actualizaciones en tiempo real.
+Future<void> _subscribeToPositionUpdates() async {
+  try {
+    final channel = await AlertasApi.subscribeToChannel('private-alerta-${widget.alertaId}');
+    
+    // ✅ SOLUCIÓN: Cambiar el tipo del parámetro a 'dynamic' y hacer un cast.
+    channel.onEvent = (dynamic event) {
+      // Hacemos una comprobación de tipo para seguridad.
+      if (event is! PusherEvent) return;
+
+      if (!mounted || event.eventName != 'posicion_actualizada' || event.data == null) {
+        return;
+      }
+      // Procesa el nuevo punto que llega en tiempo real.
+      _handleNewPosition(event.data!);
+    };
+  } catch (e) {
+    print('Error al suscribirse a actualizaciones de posición: $e');
+  }
+}
+
+  // ✅ Procesa una nueva posición recibida desde Pusher.
+  void _handleNewPosition(String jsonData) {
+    try {
+      final data = jsonDecode(jsonData);
+      final rol = data['rol'] as String?;
+      final lat = (data['latitud'] as num?)?.toDouble();
+      final lon = (data['longitud'] as num?)?.toDouble();
+
+      if (rol == null || lat == null || lon == null) return;
+      
+      final newPoint = LatLng(lat, lon);
+      
+      setState(() {
+        if (rol == 'ADULTO_MAYOR') {
+          _adultoTrail.add(newPoint);
+          _adultoLast = newPoint;
+        } else if (rol == 'CUIDADOR') {
+          _cuidadorTrail.add(newPoint);
+          _cuidadorLast = newPoint;
+        }
+      });
+
+    } catch (e) {
+      print('Error al procesar nueva posición: $e');
+    }
+  }
+  
+  // Procesa la lista completa de posiciones (usado para la carga inicial).
+  void _processPositionRows(List<dynamic> rows) {
+    // Estructura esperada: [{ rol: '...', latitud: ..., longitud: ... }, ...]
+    final adulto = <LatLng>[];
+    final cuidador = <LatLng>[];
+
+    for (final x in rows) {
+      final rol = '${x['rol'] ?? ''}';
+      final lat = (x['latitud'] as num?)?.toDouble();
+      final lon = (x['longitud'] as num?)?.toDouble();
+      if (lat == null || lon == null) continue;
+      
+      if (rol == 'ADULTO_MAYOR') {
+        adulto.add(LatLng(lat, lon));
+      } else if (rol == 'CUIDADOR') {
+        cuidador.add(LatLng(lat, lon));
+      }
+    }
+
+    // El backend trae orden DESC; invertimos para que la polyline vaya en orden temporal
+    final adultoOrdered   = List<LatLng>.from(adulto.reversed);
+    final cuidadorOrdered = List<LatLng>.from(cuidador.reversed);
+
+    if (!mounted) return;
+    setState(() {
+      _adultoTrail   = adultoOrdered.isNotEmpty   ? adultoOrdered   : _adultoTrail;
+      _cuidadorTrail = cuidadorOrdered.isNotEmpty ? cuidadorOrdered : _cuidadorTrail;
+
+      _adultoLast    = adultoOrdered.isNotEmpty   ? adultoOrdered.last   : _adultoLast;
+      _cuidadorLast  = cuidadorOrdered.isNotEmpty ? cuidadorOrdered.last : _cuidadorLast;
+    });
+  }
+
+
+  // ---- Navegación externa (sin cambios)
   Future<void> _abrirGoogleMaps() async {
     final LatLng dest = _adultoLast ?? LatLng(widget.lat, widget.lon);
-    final web = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${dest.latitude},${dest.longitude}');
-    if (!await launchUrl(web, mode: LaunchMode.externalApplication)) {
-      await launchUrl(web, mode: LaunchMode.platformDefault);
+    final url = Uri.parse('https://www.google.com/maps/search/?api=1&query=${dest.latitude},${dest.longitude}');
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo abrir Google Maps')));
     }
   }
 
   Future<void> _abrirWaze() async {
     final LatLng dest = _adultoLast ?? LatLng(widget.lat, widget.lon);
-    final deep = Uri.parse('waze://?ll=${dest.latitude},${dest.longitude}&navigate=yes');
-    final web  = Uri.parse('https://waze.com/ul?ll=${dest.latitude},${dest.longitude}&navigate=yes');
-    if (!await launchUrl(deep, mode: LaunchMode.externalApplication)) {
-      await launchUrl(web, mode: LaunchMode.externalApplication);
+    final url = Uri.parse('https://waze.com/ul?ll=${dest.latitude},${dest.longitude}&navigate=yes');
+     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo abrir Waze')));
     }
   }
 
-  // ---- Centrar mapa
+  // ---- Centrar mapa (sin cambios)
   void _centrarAdulto() {
     final LatLng c = _adultoLast ?? LatLng(widget.lat, widget.lon);
     _mapController.move(c, _mapController.camera.zoom);
@@ -147,13 +180,11 @@ setState(() {
       // Adulto (último punto o snapshot inicial)
       Marker(
         point: _adultoLast ?? initialCenter,
-        width: 54,
-        height: 54,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: const [
             Icon(Icons.location_pin, size: 44, color: Colors.red),
-            Text('Adulto', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+            Text('Adulto', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, backgroundColor: Colors.white)),
           ],
         ),
       ),
@@ -161,13 +192,11 @@ setState(() {
       if (_cuidadorLast != null)
         Marker(
           point: _cuidadorLast!,
-          width: 54,
-          height: 54,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: const [
               Icon(Icons.person_pin_circle, size: 44, color: Colors.blue),
-              Text('Tú', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+              Text('Tú', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, backgroundColor: Colors.white)),
             ],
           ),
         ),
@@ -175,7 +204,7 @@ setState(() {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Ubicación ${widget.alertaId != null ? widget.alertaId!.substring(0, 6) : ''}'),
+        title: Text('Ubicación ${widget.alertaId.substring(0, 6)}'),
       ),
       body: Stack(
         children: [
@@ -271,7 +300,7 @@ setState(() {
   }
 }
 
-// ---- Widgets auxiliares ----
+// ---- Widgets auxiliares (sin cambios) ----
 class _LegendDot extends StatelessWidget {
   final Color color;
   final String label;
