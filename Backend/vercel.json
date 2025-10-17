@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/server.js": {
+      "maxDuration": 300
+    }
+  },
   "rewrites": [
     {
       "source": "/socket.io/:path*",

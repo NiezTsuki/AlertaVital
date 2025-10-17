@@ -183,6 +183,7 @@ class AlertasApi {
         // errores 400 (Bad Request).
         // =================================================================
         final builder = IO.OptionBuilder()
+            .setTransports(['websocket'])
             .disableAutoConnect()
             .setAuth({'token': jwt});
 

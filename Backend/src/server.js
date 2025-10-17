@@ -35,8 +35,7 @@ app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST'] },
-  transports: ['polling'],
-  allowEIO3: false
+  transports: ['websocket'],
 });
 
 // 3. Aplica el middleware y la lógica de Socket.IO
