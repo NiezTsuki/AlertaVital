@@ -61,7 +61,7 @@ class _HomePageState extends State<HomePage> {
       
       unawaited(AlertasApi.initPusher(
         // ⚠️ RECUERDA PONER TUS CLAVES DE PUSHER AQUÍ ⚠️
-        apiKey: '67c27146be09c306d1f7', 
+        Key: '67c27146be09c306d1f7', 
         cluster: 'us2',
       ).then((_) {
         if (mounted) _subscribeToUserChannel();
