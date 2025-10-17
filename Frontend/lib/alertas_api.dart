@@ -1,9 +1,10 @@
+// lib/alertas_api.dart
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:pusher_channels_flutter/pusher_channels_flutter.dart';
 
 class AlertasApi {
-  // ===== Configuración (sin cambios) =====
+  // ===== Configuración =====
   static String _baseUrl = const String.fromEnvironment('API_BASE',
       defaultValue: 'https://alerta-vital-nine.vercel.app');
   static String? _token;
@@ -13,15 +14,12 @@ class AlertasApi {
     _token = token;
   }
 
-  // ===== Ayudantes HTTP (sin cambios) =====
+  // ===== Ayudantes HTTP =====
   static Uri _uri(String path, [Map<String, dynamic>? q]) {
     if (!path.startsWith('/')) path = '/$path';
     final uri = Uri.parse('$_baseUrl$path');
     if (q == null || q.isEmpty) return uri;
-    return uri.replace(queryParameters: {
-      ...uri.queryParameters,
-      ...q.map((k, v) => MapEntry(k, v?.toString())),
-    });
+    return uri.replace(queryParameters: q.map((k, v) => MapEntry(k, v?.toString())));
   }
 
   static Map<String, String> _headers() {
@@ -32,67 +30,47 @@ class AlertasApi {
   }
 
   static dynamic _parse(http.Response resp) {
-    final body = resp.body;
-    final data = body.isEmpty ? null : jsonDecode(body);
+    if (resp.body.isEmpty) {
+       if (resp.statusCode >= 200 && resp.statusCode < 300) return null;
+       throw Exception('HTTP ${resp.statusCode}');
+    }
+    final data = jsonDecode(resp.body);
     if (resp.statusCode >= 200 && resp.statusCode < 300) return data;
-    throw Exception((data is Map && data['error'] != null) ? data['error'] : 'HTTP ${resp.statusCode}');
+    throw Exception(data['error'] ?? 'HTTP ${resp.statusCode}');
   }
 
-  // ===== Endpoints de ALERTAS (sin cambios) =====
-  static Future<Map<String, dynamic>> crearSOS({
-    int countdown = 30,
-    String tipo = 'SOS',
-    String? descripcion,
-    double? lat,
-    double? lon,
-    double? precision,
-  }) async {
+  // ===== Endpoints de API REST =====
+  static Future<Map<String, dynamic>> crearSOS({double? lat, double? lon, double? precision}) async {
     final body = <String, dynamic>{
-      'tipo': tipo,
-      'descripcion': descripcion,
-      'countdown': countdown,
+      'tipo': 'SOS',
+      'countdown': 30,
     };
     if (lat != null && lon != null) {
       body['latitud'] = lat;
       body['longitud'] = lon;
       if (precision != null) body['precision_metros'] = precision;
     }
-
-    final resp = await http.post(
-      _uri('/api/alertas/sos'),
-      headers: _headers(),
-      body: jsonEncode(body),
-    );
-    final data = _parse(resp);
-    return (data as Map).cast<String, dynamic>();
+    final resp = await http.post(_uri('/api/alertas/sos'), headers: _headers(), body: jsonEncode(body));
+    return _parse(resp);
   }
 
   static Future<void> aceptarAlerta(String alertaId) async {
-    final resp = await http.post(
-      _uri('/api/alertas/$alertaId/aceptar'),
-      headers: _headers(),
-    );
-    _parse(resp);
+    await http.post(_uri('/api/alertas/$alertaId/aceptar'), headers: _headers());
   }
 
   static Future<void> derivarAlerta(String alertaId) async {
-    final resp = await http.post(
-      _uri('/api/alertas/$alertaId/derivar'),
-      headers: _headers(),
-    );
-    _parse(resp);
+    await http.post(_uri('/api/alertas/$alertaId/derivar'), headers: _headers());
   }
 
-  static Future<void> completarAlerta(String alertaId) async {
-    final resp = await http.post(
-      _uri('/api/alertas/$alertaId/completar'),
-      headers: _headers(),
-    );
-    _parse(resp);
+  static Future<List<dynamic>> getPosiciones(String alertaId) async {
+    final resp = await http.get(_uri('/api/alertas/$alertaId/posiciones'), headers: _headers());
+    return _parse(resp) ?? [];
   }
 
-  // ===== Ubicaciones (sin cambios) =====
-  static Future<void> registrarUbicacion(double lat, double lon, {double? precision}) async {
+  static Future<void> registrarPosicionAlerta(String alertaId, double lat, double lon, {double? precision}) async {
+    await http.post(_uri('/api/alertas/$alertaId/posicion'), headers: _headers(), body: jsonEncode({'latitud': lat, 'longitud': lon, 'precision_metros': precision}));
+  }
+   static Future<void> registrarUbicacion(double lat, double lon, {double? precision}) async {
     final resp = await http.post(
       _uri('/api/ubicaciones'),
       headers: _headers(),
@@ -105,59 +83,22 @@ class AlertasApi {
     _parse(resp);
   }
 
-  static Future<void> registrarPosicionAlerta(
-    String alertaId,
-    double lat,
-    double lon, {
-    double? precision,
-  }) async {
-    final resp = await http.post(
-      _uri('/api/alertas/$alertaId/posicion'),
-      headers: _headers(),
-      body: jsonEncode({
-        'latitud': lat,
-        'longitud': lon,
-        if (precision != null) 'precision_metros': precision,
-      }),
-    );
-    _parse(resp);
-  }
-
-  static Future<List<dynamic>> getPosiciones(String alertaId, {String? rol}) async {
-    final resp = await http.get(
-      _uri('/api/alertas/$alertaId/posiciones', {if (rol != null) 'rol': rol}),
-      headers: _headers(),
-    );
-    final data = _parse(resp);
-    if (data == null) return <dynamic>[];
-    return (data as List).cast<dynamic>();
-  }
-  
-  // ===== LÓGICA DE PUSHER =====
+  // ===== Lógica de Pusher =====
   static final PusherChannelsFlutter _pusher = PusherChannelsFlutter.getInstance();
   static bool _isPusherInitialized = false;
 
-  static Future<void> initPusher({
-    required String apiKey,
-    required String cluster,
-  }) async {
+  static Future<void> initPusher({required String apiKey, required String cluster}) async {
     if (_isPusherInitialized) return;
-    final token = _token;
-    if (token == null || token.isEmpty) return;
+    if (_token == null || _token!.isEmpty) return;
 
     try {
-      final authEndpoint = Uri.parse('$_baseUrl/auth/pusher/auth');
       await _pusher.init(
         apiKey: apiKey,
         cluster: cluster,
         onConnectionStateChange: (currentState, previousState) => print("🔌 [PUSHER] Estado: $currentState"),
         onError: (message, code, error) => print("❌ [PUSHER] Error: $message, code: $code, error: $error"),
         onAuthorizer: (channelName, socketId, options) async {
-          final resp = await http.post(
-            authEndpoint,
-            headers: _headers(),
-            body: jsonEncode({'socket_id': socketId, 'channel_name': channelName}),
-          );
+          final resp = await http.post(_uri('/auth/pusher/auth'), headers: _headers(), body: jsonEncode({'socket_id': socketId, 'channel_name': channelName}));
           return jsonDecode(resp.body);
         },
       );
@@ -165,16 +106,11 @@ class AlertasApi {
       _isPusherInitialized = true;
     } catch (e) {
       print('💥 [PUSHER] Excepción al inicializar: $e');
-      _isPusherInitialized = false;
     }
   }
 
   static Future<PusherChannel> subscribeToChannel(String channelName) async {
-    PusherChannel? channel = _pusher.getChannel(channelName);
-    if (channel == null) {
-      channel = await _pusher.subscribe(channelName: channelName);
-    }
-    return channel;
+    return await _pusher.subscribe(channelName: channelName);
   }
 
   static void unsubscribeFromChannel(String channelName) {

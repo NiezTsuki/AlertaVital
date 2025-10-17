@@ -6,19 +6,18 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:pusher_channels_flutter/pusher_channels_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-
 import '/alertas_api.dart';
 
 class MapaAlertaPage extends StatefulWidget {
-  final String alertaId; // Hacemos que el ID sea requerido para esta vista
-  final double lat; // posición inicial del adulto (snapshot al crear SOS)
+  final String alertaId;
+  final double lat; // posición inicial del adulto
   final double lon;
 
   const MapaAlertaPage({
     super.key,
+    required this.alertaId,
     required this.lat,
     required this.lon,
-    required this.alertaId,
   });
 
   @override
@@ -38,10 +37,15 @@ class _MapaAlertaPageState extends State<MapaAlertaPage> {
   void initState() {
     super.initState();
     _adultoLast = LatLng(widget.lat, widget.lon);
-    
-    // ✅ SOLUCIÓN: Reemplazamos el polling por una carga inicial + suscripción a tiempo real.
-    _fetchInitialPositions(); // Carga el historial de posiciones al entrar
-    _subscribeToPositionUpdates(); // Se suscribe para recibir nuevas posiciones
+    _fetchInitialPositions();
+    _subscribeToPositionUpdates();
+  }
+
+  @override
+  void dispose() {
+    // Es una buena práctica desuscribirse del canal al salir de la pantalla
+    AlertasApi.unsubscribeFromChannel('private-alerta-${widget.alertaId}');
+    super.dispose();
   }
 
   // Carga el historial de posiciones que ya existen en el servidor.
@@ -49,33 +53,29 @@ class _MapaAlertaPageState extends State<MapaAlertaPage> {
     try {
       final rows = await AlertasApi.getPosiciones(widget.alertaId);
       _processPositionRows(rows);
-    } catch (_) {
-      // Manejo de error silencioso, la UI simplemente no mostrará el historial
+    } catch (e) {
+      print('Error al cargar la ruta inicial: $e');
     }
   }
 
- // ✅ Se suscribe al canal de Pusher para recibir actualizaciones en tiempo real.
-Future<void> _subscribeToPositionUpdates() async {
-  try {
-    final channel = await AlertasApi.subscribeToChannel('private-alerta-${widget.alertaId}');
-    
-    // ✅ SOLUCIÓN: Cambiar el tipo del parámetro a 'dynamic' y hacer un cast.
-    channel.onEvent = (dynamic event) {
-      // Hacemos una comprobación de tipo para seguridad.
-      if (event is! PusherEvent) return;
-
-      if (!mounted || event.eventName != 'posicion_actualizada' || event.data == null) {
-        return;
-      }
-      // Procesa el nuevo punto que llega en tiempo real.
-      _handleNewPosition(event.data!);
-    };
-  } catch (e) {
-    print('Error al suscribirse a actualizaciones de posición: $e');
+  // Se suscribe al canal de Pusher para recibir actualizaciones en tiempo real.
+  Future<void> _subscribeToPositionUpdates() async {
+    try {
+      final channel = await AlertasApi.subscribeToChannel('private-alerta-${widget.alertaId}');
+      
+      // Asigna una función al callback onEvent para manejar los eventos.
+      channel.onEvent = (event) {
+        if (!mounted || event.eventName != 'posicion_actualizada' || event.data == null) {
+          return;
+        }
+        _handleNewPosition(event.data!);
+      };
+    } catch (e) {
+      print('Error al suscribirse a actualizaciones de posición: $e');
+    }
   }
-}
 
-  // ✅ Procesa una nueva posición recibida desde Pusher.
+  // Procesa una nueva posición recibida desde Pusher.
   void _handleNewPosition(String jsonData) {
     try {
       final data = jsonDecode(jsonData);
@@ -96,7 +96,6 @@ Future<void> _subscribeToPositionUpdates() async {
           _cuidadorLast = newPoint;
         }
       });
-
     } catch (e) {
       print('Error al procesar nueva posición: $e');
     }
@@ -104,7 +103,6 @@ Future<void> _subscribeToPositionUpdates() async {
   
   // Procesa la lista completa de posiciones (usado para la carga inicial).
   void _processPositionRows(List<dynamic> rows) {
-    // Estructura esperada: [{ rol: '...', latitud: ..., longitud: ... }, ...]
     final adulto = <LatLng>[];
     final cuidador = <LatLng>[];
 
@@ -121,200 +119,139 @@ Future<void> _subscribeToPositionUpdates() async {
       }
     }
 
-    // El backend trae orden DESC; invertimos para que la polyline vaya en orden temporal
-    final adultoOrdered   = List<LatLng>.from(adulto.reversed);
+    final adultoOrdered = List<LatLng>.from(adulto.reversed);
     final cuidadorOrdered = List<LatLng>.from(cuidador.reversed);
 
     if (!mounted) return;
     setState(() {
-      _adultoTrail   = adultoOrdered.isNotEmpty   ? adultoOrdered   : _adultoTrail;
-      _cuidadorTrail = cuidadorOrdered.isNotEmpty ? cuidadorOrdered : _cuidadorTrail;
-
-      _adultoLast    = adultoOrdered.isNotEmpty   ? adultoOrdered.last   : _adultoLast;
-      _cuidadorLast  = cuidadorOrdered.isNotEmpty ? cuidadorOrdered.last : _cuidadorLast;
+      _adultoTrail = adultoOrdered;
+      _cuidadorTrail = cuidadorOrdered;
+      if (adultoOrdered.isNotEmpty) _adultoLast = adultoOrdered.last;
+      if (cuidadorOrdered.isNotEmpty) _cuidadorLast = cuidadorOrdered.last;
     });
   }
 
-
-  // ---- Navegación externa (sin cambios)
-  Future<void> _abrirGoogleMaps() async {
-    final LatLng dest = _adultoLast ?? LatLng(widget.lat, widget.lon);
-    final url = Uri.parse('https://www.google.com/maps/search/?api=1&query=${dest.latitude},${dest.longitude}');
+  // ---- Navegación externa ----
+  Future<void> _launchMapUrl(Uri url) async {
     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo abrir Google Maps')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo abrir ${url.scheme}')));
     }
   }
 
-  Future<void> _abrirWaze() async {
-    final LatLng dest = _adultoLast ?? LatLng(widget.lat, widget.lon);
-    final url = Uri.parse('https://waze.com/ul?ll=${dest.latitude},${dest.longitude}&navigate=yes');
-     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo abrir Waze')));
-    }
+  void _abrirGoogleMaps() {
+    final dest = _adultoLast ?? LatLng(widget.lat, widget.lon);
+    _launchMapUrl(Uri.parse('https://www.google.com/maps/search/?api=1&query=${dest.latitude},${dest.longitude}'));
   }
 
-  // ---- Centrar mapa (sin cambios)
+  void _abrirWaze() {
+    final dest = _adultoLast ?? LatLng(widget.lat, widget.lon);
+    _launchMapUrl(Uri.parse('https://waze.com/ul?ll=${dest.latitude},${dest.longitude}&navigate=yes'));
+  }
+
+  // ---- Centrar mapa ----
   void _centrarAdulto() {
-    final LatLng c = _adultoLast ?? LatLng(widget.lat, widget.lon);
+    final c = _adultoLast ?? LatLng(widget.lat, widget.lon);
     _mapController.move(c, _mapController.camera.zoom);
   }
 
   void _centrarCuidador() {
-    if (_cuidadorLast == null) return;
-    _mapController.move(_cuidadorLast!, _mapController.camera.zoom);
+    if (_cuidadorLast != null) {
+      _mapController.move(_cuidadorLast!, _mapController.camera.zoom);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final LatLng initialCenter = LatLng(widget.lat, widget.lon);
+    final initialCenter = LatLng(widget.lat, widget.lon);
 
-    // Construcción de capas
     final polylines = <Polyline>[
-      if (_adultoTrail.length >= 2)
-        Polyline(points: _adultoTrail, strokeWidth: 5, color: Colors.red.withOpacity(0.85)),
-      if (_cuidadorTrail.length >= 2)
-        Polyline(points: _cuidadorTrail, strokeWidth: 5, color: Colors.blue.withOpacity(0.85)),
+      if (_adultoTrail.length >= 2) Polyline(points: _adultoTrail, strokeWidth: 5, color: Colors.red.withOpacity(0.85)),
+      if (_cuidadorTrail.length >= 2) Polyline(points: _cuidadorTrail, strokeWidth: 5, color: Colors.blue.withOpacity(0.85)),
     ];
 
     final markers = <Marker>[
-      // Adulto (último punto o snapshot inicial)
       Marker(
         point: _adultoLast ?? initialCenter,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: const [
-            Icon(Icons.location_pin, size: 44, color: Colors.red),
-            Text('Adulto', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, backgroundColor: Colors.white)),
-          ],
-        ),
+        child: const Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.location_pin, size: 44, color: Colors.red),
+          _MarkerLabel(text: 'Adulto'),
+        ]),
       ),
-      // Cuidador (si hay)
       if (_cuidadorLast != null)
         Marker(
           point: _cuidadorLast!,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: const [
-              Icon(Icons.person_pin_circle, size: 44, color: Colors.blue),
-              Text('Tú', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, backgroundColor: Colors.white)),
-            ],
-          ),
+          child: const Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.person_pin_circle, size: 44, color: Colors.blue),
+            _MarkerLabel(text: 'Tú'),
+          ]),
         ),
     ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Ubicación ${widget.alertaId.substring(0, 6)}'),
-      ),
+      appBar: AppBar(title: Text('Ubicación de Alerta')),
       body: Stack(
         children: [
           FlutterMap(
             mapController: _mapController,
-            options: MapOptions(
-              initialCenter: initialCenter,
-              initialZoom: 16,
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.all,
-              ),
-            ),
+            options: MapOptions(initialCenter: initialCenter, initialZoom: 16),
             children: [
               TileLayer(
                 urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
                 subdomains: const ['a', 'b', 'c'],
-                userAgentPackageName: 'com.alerta.vital',
               ),
-              if (polylines.isNotEmpty)
-                PolylineLayer(polylines: polylines),
+              if (polylines.isNotEmpty) PolylineLayer(polylines: polylines),
               MarkerLayer(markers: markers),
             ],
           ),
-
-          // Leyenda simple (arriba a la izquierda)
           Positioned(
-            left: 12,
-            top: 12,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: const [
+            left: 12, top: 12,
+            child: Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                child: Row(mainAxisSize: MainAxisSize.min, children: const [
                   _LegendDot(color: Colors.red, label: 'Adulto'),
                   SizedBox(width: 12),
                   _LegendDot(color: Colors.blue, label: 'Tú (cuidador)'),
-                ],
+                ]),
               ),
             ),
           ),
-
-          // Botones de centrar (arriba a la derecha)
           Positioned(
-            right: 12,
-            top: 12,
-            child: Column(
-              children: [
-                _RoundIconButton(
-                  icon: Icons.center_focus_strong,
-                  tooltip: 'Centrar en adulto',
-                  onTap: _centrarAdulto,
-                ),
-                const SizedBox(height: 10),
-                _RoundIconButton(
-                  icon: Icons.my_location,
-                  tooltip: 'Centrar en cuidador',
-                  onTap: _centrarCuidador,
-                  disabled: _cuidadorLast == null,
-                ),
-              ],
-            ),
+            right: 12, top: 12,
+            child: Column(children: [
+              _RoundIconButton(icon: Icons.center_focus_strong, tooltip: 'Centrar en adulto', onTap: _centrarAdulto),
+              const SizedBox(height: 10),
+              _RoundIconButton(icon: Icons.my_location, tooltip: 'Centrar en cuidador', onTap: _centrarCuidador, disabled: _cuidadorLast == null),
+            ]),
           ),
         ],
       ),
       bottomNavigationBar: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
-        child: Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _abrirWaze,
-                icon: const Icon(Icons.directions_car),
-                label: const Text('Abrir en Waze'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: _abrirGoogleMaps,
-                icon: const Icon(Icons.map),
-                label: const Text('Abrir en Google Maps'),
-              ),
-            ),
-          ],
-        ),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        child: Row(children: [
+          Expanded(child: OutlinedButton.icon(onPressed: _abrirWaze, icon: const Icon(Icons.directions_car), label: const Text('Waze'))),
+          const SizedBox(width: 12),
+          Expanded(child: FilledButton.icon(onPressed: _abrirGoogleMaps, icon: const Icon(Icons.map), label: const Text('Google Maps'))),
+        ]),
       ),
     );
   }
 }
 
-// ---- Widgets auxiliares (sin cambios) ----
+// ---- Widgets auxiliares ----
 class _LegendDot extends StatelessWidget {
   final Color color;
   final String label;
   const _LegendDot({required this.color, required this.label});
-
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-        const SizedBox(width: 6),
-        Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-      ],
-    );
+    return Row(children: [
+      Container(width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+      const SizedBox(width: 6),
+      Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+    ]);
   }
 }
 
@@ -323,28 +260,40 @@ class _RoundIconButton extends StatelessWidget {
   final String tooltip;
   final VoidCallback onTap;
   final bool disabled;
-
-  const _RoundIconButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-    this.disabled = false,
-  });
-
+  const _RoundIconButton({required this.icon, required this.tooltip, required this.onTap, this.disabled = false});
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: disabled ? Colors.grey.shade300 : Theme.of(context).colorScheme.surface,
+      color: disabled ? Theme.of(context).disabledColor : Theme.of(context).cardColor,
       shape: const CircleBorder(),
-      elevation: 2,
-      child: InkWell(
-        onTap: disabled ? null : onTap,
-        customBorder: const CircleBorder(),
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Icon(icon, size: 22, color: disabled ? Colors.grey : Colors.black87),
+      elevation: 4,
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: disabled ? null : onTap,
+          customBorder: const CircleBorder(),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Icon(icon, size: 22, color: disabled ? Colors.grey[600] : Theme.of(context).iconTheme.color),
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _MarkerLabel extends StatelessWidget {
+  final String text;
+  const _MarkerLabel({required this.text});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(text, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.black87)),
     );
   }
 }
