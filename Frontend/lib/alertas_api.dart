@@ -70,8 +70,9 @@ class AlertasApi {
   static Future<void> registrarPosicionAlerta(String alertaId, double lat, double lon, {double? precision}) async {
     await http.post(_uri('/api/alertas/$alertaId/posicion'), headers: _headers(), body: jsonEncode({'latitud': lat, 'longitud': lon, 'precision_metros': precision}));
   }
+
    static Future<void> registrarUbicacion(double lat, double lon, {double? precision}) async {
-    final resp = await http.post(
+    await http.post(
       _uri('/api/ubicaciones'),
       headers: _headers(),
       body: jsonEncode({
@@ -80,16 +81,16 @@ class AlertasApi {
         if (precision != null) 'precision_metros': precision,
       }),
     );
-    _parse(resp);
   }
 
   // ===== Lógica de Pusher =====
   static final PusherChannelsFlutter _pusher = PusherChannelsFlutter.getInstance();
   static bool _isPusherInitialized = false;
 
-  static Future<void> initPusher({required String apiKey, required String cluster}) async {
-    if (_isPusherInitialized) return;
-    if (_token == null || _token!.isEmpty) return;
+  // ✅ CORRECCIÓN: La función ahora devuelve un bool para indicar éxito o fracaso.
+  static Future<bool> initPusher({required String apiKey, required String cluster}) async {
+    if (_isPusherInitialized) return true;
+    if (_token == null || _token!.isEmpty) return false;
 
     try {
       await _pusher.init(
@@ -104,16 +105,24 @@ class AlertasApi {
       );
       await _pusher.connect();
       _isPusherInitialized = true;
+      print('✅ [PUSHER] Conexión exitosa.');
+      return true; // Devuelve 'true' en caso de éxito
     } catch (e) {
       print('💥 [PUSHER] Excepción al inicializar: $e');
+      _isPusherInitialized = false;
+      return false; // Devuelve 'false' si falla
     }
   }
 
   static Future<PusherChannel> subscribeToChannel(String channelName) async {
+    if (!_isPusherInitialized) {
+      throw Exception("Pusher no ha sido inicializado. No se puede suscribir al canal.");
+    }
     return await _pusher.subscribe(channelName: channelName);
   }
 
   static void unsubscribeFromChannel(String channelName) {
+    if (!_isPusherInitialized) return;
     _pusher.unsubscribe(channelName: channelName);
   }
 

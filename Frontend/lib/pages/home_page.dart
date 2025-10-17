@@ -28,7 +28,10 @@ class _HomePageState extends State<HomePage> {
   String? _alertaId;
   String _estadoTexto = 'Listo para ayudar';
   final List<_IncomingAlert> _incoming = [];
-  bool _isPusherInitialized = false;
+  bool _isServicesInitialized = false;
+  
+  // ✅ ESTADO PRINCIPAL: Controla si la conexión en tiempo real está lista.
+  bool _isRealTimeReady = false;
 
   // ===== Getters de conveniencia =====
   bool get _esAdultoMayor => context.read<AuthState>().user?['rol'] == 'ADULTO_MAYOR';
@@ -38,24 +41,13 @@ class _HomePageState extends State<HomePage> {
 
   // ===== Ciclo de Vida del Widget =====
   @override
-  void initState() {
-    super.initState();
-    _startHeartbeatUbicacion();
-  }
-
-  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final auth = context.watch<AuthState>();
-    if (!_isPusherInitialized && auth.token != null && auth.user != null) {
-      setState(() => _isPusherInitialized = true);
-      unawaited(AlertasApi.initPusher(
-        // ✅ Tus claves de Pusher insertadas aquí
-        apiKey: '67c27146be09c306d1f7',
-        cluster: 'us2',
-      ).then((_) {
-        if (mounted) _subscribeToUserChannel();
-      }));
+    // ✅ CORRECCIÓN: Nos aseguramos de inicializar todo solo una vez y cuando tengamos token.
+    if (!_isServicesInitialized && auth.token != null && auth.user != null) {
+      setState(() => _isServicesInitialized = true);
+      _initializeAuthenticatedServices();
     }
   }
 
@@ -68,13 +60,33 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  // ===== Lógica de Pusher =====
-  Future<void> _subscribeToUserChannel() async {
-    if (_userId == null || _token == null) return;
+  // ===== Lógica de Inicialización y Pusher =====
+  void _initializeAuthenticatedServices() {
+    print("✅ Usuario autenticado. Inicializando servicios...");
+    if (_token == null) return;
     AlertasApi.configure(baseUrl: Api.baseUrl, token: _token!);
+
+    // Inicia el envío de ubicación una vez y luego periódicamente.
+    _sendLocationOnce();
+    _startHeartbeatUbicacion();
+
+    unawaited(AlertasApi.initPusher(
+      apiKey: '67c27146be09c306d1f7',
+      cluster: 'us2',
+    ).then((success) {
+      if (mounted) {
+        setState(() => _isRealTimeReady = success);
+        if (success) {
+          _subscribeToUserChannel();
+        }
+      }
+    }));
+  }
+
+  Future<void> _subscribeToUserChannel() async {
+    if (_userId == null) return;
     final userChannel = await AlertasApi.subscribeToChannel('private-user-$_userId');
 
-    // ✅ SOLUCIÓN DEFINITIVA: Asignar una función directamente al callback onEvent.
     userChannel.onEvent = (event) {
       if (!mounted) return;
       switch (event.eventName) {
@@ -88,9 +100,6 @@ class _HomePageState extends State<HomePage> {
 
   // ===== Lógica de SOS y Handlers de Eventos =====
   Future<void> _onSosPressed() async {
-    if (_token == null) return;
-    AlertasApi.configure(baseUrl: Api.baseUrl, token: _token!);
-
     try {
       final pos = await _getCurrentPosition();
       final r = await AlertasApi.crearSOS(lat: pos?.latitude, lon: pos?.longitude, precision: pos?.accuracy);
@@ -98,12 +107,8 @@ class _HomePageState extends State<HomePage> {
       if (id == null) throw Exception('No se pudo crear la alerta');
 
       final alertaChannel = await AlertasApi.subscribeToChannel('private-alerta-$id');
-      
-      // ✅ SOLUCIÓN DEFINITIVA: Asignar una función directamente al callback onEvent.
       alertaChannel.onEvent = (event) {
-        if (mounted && event.eventName == 'derivada_siguiente') {
-          _onDerivada(event);
-        }
+        if (mounted && event.eventName == 'derivada_siguiente') _onDerivada(event);
       };
 
       setState(() {
@@ -119,10 +124,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _onAlertaNueva(PusherEvent event) {
-    final data = jsonDecode(event.data);
+    if (event.data == null) return;
+    final data = jsonDecode(event.data!);
     final alertaId = data['alertaId']?.toString();
     if (alertaId == null) return;
-
     if (!_incoming.any((a) => a.alertaId == alertaId)) {
       setState(() => _incoming.insert(0, _IncomingAlert.fromJson(data)));
     }
@@ -137,6 +142,7 @@ class _HomePageState extends State<HomePage> {
     setState(() => _estadoTexto = finalState);
     _stopCountdown();
     _stopAdultoTrail();
+    if (_alertaId != null) AlertasApi.unsubscribeFromChannel('private-alerta-${_alertaId!}');
     Future.delayed(const Duration(seconds: 4), () {
       if (mounted) setState(() => _alertaId = null);
     });
@@ -150,12 +156,12 @@ class _HomePageState extends State<HomePage> {
     });
   }
   void _stopCountdown() => _sosTimer?.cancel();
-
+  
   void _startAdultoTrail() {
     _stopAdultoTrail();
     if (_alertaId == null) return;
     _adultoTrailTimer = Timer.periodic(const Duration(seconds: 7), (_) async {
-      if (_alertaId == null) return;
+      if (_alertaId == null || !mounted) return;
       final pos = await _getCurrentPosition();
       if (pos != null) {
         try {
@@ -169,29 +175,37 @@ class _HomePageState extends State<HomePage> {
   void _startHeartbeatUbicacion() { 
     _hbTimer?.cancel();
     _hbTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
-       final pos = await _getCurrentPosition();
-      if (pos == null || !mounted) return;
+      if (_token == null || !mounted) return; // Verificación de seguridad
+      await _sendLocationOnce();
+    });
+  }
+  
+  Future<void> _sendLocationOnce() async {
+    final pos = await _getCurrentPosition();
+    if (pos != null && _token != null) {
       try {
         await AlertasApi.registrarUbicacion(pos.latitude, pos.longitude, precision: pos.accuracy);
+        print('📍 Ubicación enviada.');
       } catch (_) {}
-    });
+    }
   }
   
   Future<Position?> _getCurrentPosition() async {
     try {
-      if (!await Geolocator.isLocationServiceEnabled()) return null;
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return null;
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) return null;
       return await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-    } catch (e) {
+    } catch (_) {
       return null;
     }
   }
 
-  // ===== Acciones de UI =====
+  // ===== Acciones de UI y Navegación =====
   Future<void> _acceptIncoming(_IncomingAlert item) async {
     try {
       await AlertasApi.aceptarAlerta(item.alertaId);
@@ -213,11 +227,12 @@ class _HomePageState extends State<HomePage> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al derivar: $e')));
     }
   }
-  
-  // ===== Navegación =====
+
   void _goVincular() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const VincularPage()));
   void _goMisVinculos() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MisVinculosPage()));
+  
   Future<void> _logout() async {
+    _hbTimer?.cancel();
     await context.read<AuthState>().logout();
     AlertasApi.dispose();
     if (!mounted) return;
@@ -227,14 +242,11 @@ class _HomePageState extends State<HomePage> {
   // ===== Construcción de la UI =====
   @override
   Widget build(BuildContext context) {
-    final isAdulto = _esAdultoMayor;
-    final isCuidador = _esCuidador;
-
     return Scaffold(
       appBar: AppBar(
-        title: Text(isAdulto ? 'AlertaVital' : 'AlertaVital — Cuidador'),
+        title: Text(_esAdultoMayor ? 'AlertaVital' : 'AlertaVital — Cuidador'),
         actions: [
-          if (isAdulto) IconButton(tooltip: 'Vincular cuidador', icon: const Icon(Icons.link), onPressed: _goVincular),
+          if (_esAdultoMayor) IconButton(tooltip: 'Vincular cuidador', icon: const Icon(Icons.link), onPressed: _goVincular),
           IconButton(tooltip: 'Mis vínculos', icon: const Icon(Icons.group), onPressed: _goMisVinculos),
           IconButton(tooltip: 'Cerrar sesión', icon: const Icon(Icons.power_settings_new), onPressed: _logout),
         ],
@@ -242,27 +254,31 @@ class _HomePageState extends State<HomePage> {
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24.0),
-          child: isAdulto
+          child: _esAdultoMayor
               ? Column(mainAxisSize: MainAxisSize.min, children: [
-                  SosBigButton(onPressed: _onSosPressed),
+                  SosBigButton(onPressed: _isRealTimeReady ? _onSosPressed : null),
                   const SizedBox(height: 16),
-                  if (_alertaId != null) ...[
+                  if (!_isRealTimeReady)
+                    const Text('Conectando al servicio de alertas...')
+                  else if (_alertaId != null) ...[
                     _EstadoChip(text: _estadoTexto),
                     const SizedBox(height: 8),
                     _CountdownDisplay(value: _countdown),
                   ] else
-                    const Text('Presiona el botón para pedir ayuda.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16)),
+                    const Text('Presiona el botón para pedir ayuda.'),
                 ])
-              : isCuidador
+              : _esCuidador
                   ? _CaregiverView(items: _incoming, onAccept: _acceptIncoming, onDerive: _deriveIncoming)
-                  : const Text('Rol no reconocido.', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  : const CircularProgressIndicator(),
         ),
       ),
     );
   }
 }
 
-// ===== Clases y Widgets Auxiliares (sin cambios) =====
+// ============================================================================
+// WIDGETS Y CLASES AUXILIARES
+// ============================================================================
 class _IncomingAlert {
   final String alertaId;
   final int orden;
@@ -279,6 +295,7 @@ class _IncomingAlert {
     );
   }
 }
+
 class _CaregiverView extends StatelessWidget {
   final List<_IncomingAlert> items;
   final Future<void> Function(_IncomingAlert) onAccept;
@@ -297,6 +314,7 @@ class _CaregiverView extends StatelessWidget {
     );
   }
 }
+
 class _IncomingCard extends StatelessWidget {
   final _IncomingAlert item;
   final VoidCallback onAccept;
@@ -334,6 +352,7 @@ class _IncomingCard extends StatelessWidget {
     );
   }
 }
+
 class _InfoChip extends StatelessWidget {
   final String label;
   final String value;
@@ -350,23 +369,29 @@ class _InfoChip extends StatelessWidget {
     );
   }
 }
+
 class SosBigButton extends StatelessWidget {
   final VoidCallback? onPressed;
   const SosBigButton({super.key, required this.onPressed});
   @override
   Widget build(BuildContext context) {
+    final bool isEnabled = onPressed != null;
     final size = MediaQuery.of(context).size;
     final diameter = (size.width * 0.65).clamp(200.0, 380.0);
-    final isEnabled = onPressed != null;
 
     return InkWell(
       onTap: onPressed,
       borderRadius: BorderRadius.circular(diameter / 2),
       child: Container(
-        width: diameter, height: diameter,
+        width: diameter,
+        height: diameter,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          gradient: LinearGradient(colors: isEnabled ? [const Color(0xFFFF6B6B), const Color(0xFFFF2E2E)] : [Colors.grey.shade400, Colors.grey.shade600]),
+          gradient: LinearGradient(
+            colors: isEnabled
+                ? [const Color(0xFFFF6B6B), const Color(0xFFFF2E2E)]
+                : [Colors.grey.shade500, Colors.grey.shade700],
+          ),
           boxShadow: [ BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 18, offset: const Offset(0, 8)) ],
         ),
         alignment: Alignment.center,
@@ -375,6 +400,7 @@ class SosBigButton extends StatelessWidget {
     );
   }
 }
+
 class _CountdownDisplay extends StatelessWidget {
   final int value;
   const _CountdownDisplay({required this.value});
@@ -387,6 +413,7 @@ class _CountdownDisplay extends StatelessWidget {
     );
   }
 }
+
 class _EstadoChip extends StatelessWidget {
   final String text;
   const _EstadoChip({required this.text});
