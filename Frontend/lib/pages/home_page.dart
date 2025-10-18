@@ -1,4 +1,3 @@
-// lib/pages/home_page.dart
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -14,6 +13,7 @@ import 'vincular_page.dart';
 import 'mis_vinculos_page.dart';
 import 'login_page.dart';
 import 'mapa_alerta_page.dart';
+import 'aceptar_vinculo_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -29,8 +29,6 @@ class _HomePageState extends State<HomePage> {
   String _estadoTexto = 'Listo para ayudar';
   final List<_IncomingAlert> _incoming = [];
   bool _isServicesInitialized = false;
-  
-  // ✅ ESTADO PRINCIPAL: Controla si la conexión en tiempo real está lista.
   bool _isRealTimeReady = false;
 
   // ===== Getters de conveniencia =====
@@ -44,7 +42,6 @@ class _HomePageState extends State<HomePage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final auth = context.watch<AuthState>();
-    // ✅ CORRECCIÓN: Nos aseguramos de inicializar todo solo una vez y cuando tengamos token.
     if (!_isServicesInitialized && auth.token != null && auth.user != null) {
       setState(() => _isServicesInitialized = true);
       _initializeAuthenticatedServices();
@@ -62,23 +59,17 @@ class _HomePageState extends State<HomePage> {
 
   // ===== Lógica de Inicialización y Pusher =====
   void _initializeAuthenticatedServices() {
-    print("✅ Usuario autenticado. Inicializando servicios...");
     if (_token == null) return;
     AlertasApi.configure(baseUrl: Api.baseUrl, token: _token!);
-
-    // Inicia el envío de ubicación una vez y luego periódicamente.
     _sendLocationOnce();
     _startHeartbeatUbicacion();
-
     unawaited(AlertasApi.initPusher(
       apiKey: '67c27146be09c306d1f7',
       cluster: 'us2',
     ).then((success) {
       if (mounted) {
         setState(() => _isRealTimeReady = success);
-        if (success) {
-          _subscribeToUserChannel();
-        }
+        if (success) _subscribeToUserChannel();
       }
     }));
   }
@@ -86,7 +77,6 @@ class _HomePageState extends State<HomePage> {
   Future<void> _subscribeToUserChannel() async {
     if (_userId == null) return;
     final userChannel = await AlertasApi.subscribeToChannel('private-user-$_userId');
-
     userChannel.onEvent = (event) {
       if (!mounted) return;
       switch (event.eventName) {
@@ -98,7 +88,7 @@ class _HomePageState extends State<HomePage> {
     };
   }
 
-  // ===== Lógica de SOS y Handlers de Eventos =====
+  // ===== Lógica de SOS y Handlers de Eventos (COMPLETA) =====
   Future<void> _onSosPressed() async {
     try {
       final pos = await _getCurrentPosition();
@@ -148,7 +138,7 @@ class _HomePageState extends State<HomePage> {
     });
   }
   
-  // ===== Timers y GPS =====
+  // ===== Timers y GPS (COMPLETOS) =====
   void _startCountdown() {
     _sosTimer?.cancel();
     _sosTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -175,7 +165,7 @@ class _HomePageState extends State<HomePage> {
   void _startHeartbeatUbicacion() { 
     _hbTimer?.cancel();
     _hbTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
-      if (_token == null || !mounted) return; // Verificación de seguridad
+      if (_token == null || !mounted) return;
       await _sendLocationOnce();
     });
   }
@@ -185,7 +175,6 @@ class _HomePageState extends State<HomePage> {
     if (pos != null && _token != null) {
       try {
         await AlertasApi.registrarUbicacion(pos.latitude, pos.longitude, precision: pos.accuracy);
-        print('📍 Ubicación enviada.');
       } catch (_) {}
     }
   }
@@ -228,7 +217,8 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _goVincular() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const VincularPage()));
+  void _goInvitar() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const VincularPage()));
+  void _goAceptarVinculo() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AceptarVinculoPage()));
   void _goMisVinculos() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MisVinculosPage()));
   
   Future<void> _logout() async {
@@ -239,45 +229,80 @@ class _HomePageState extends State<HomePage> {
     Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginPage()), (route) => false);
   }
 
-  // ===== Construcción de la UI =====
+  // ===== Construcción de la UI (REDISEÑADA) =====
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(_esAdultoMayor ? 'AlertaVital' : 'AlertaVital — Cuidador'),
         actions: [
-          if (_esAdultoMayor) IconButton(tooltip: 'Vincular cuidador', icon: const Icon(Icons.link), onPressed: _goVincular),
-          IconButton(tooltip: 'Mis vínculos', icon: const Icon(Icons.group), onPressed: _goMisVinculos),
-          IconButton(tooltip: 'Cerrar sesión', icon: const Icon(Icons.power_settings_new), onPressed: _logout),
+          IconButton(tooltip: 'Enviar Invitación', icon: const Icon(Icons.link), onPressed: _goInvitar),
+          IconButton(tooltip: 'Aceptar Invitación', icon: const Icon(Icons.person_add_alt_1_outlined), onPressed: _goAceptarVinculo),
+          IconButton(tooltip: 'Mis Vínculos', icon: const Icon(Icons.group_outlined), onPressed: _goMisVinculos),
+          IconButton(tooltip: 'Cerrar Sesión', icon: const Icon(Icons.power_settings_new), onPressed: _logout),
         ],
       ),
       body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: _esAdultoMayor
-              ? Column(mainAxisSize: MainAxisSize.min, children: [
-                  SosBigButton(onPressed: _isRealTimeReady ? _onSosPressed : null),
-                  const SizedBox(height: 16),
-                  if (!_isRealTimeReady)
-                    const Text('Conectando al servicio de alertas...')
-                  else if (_alertaId != null) ...[
-                    _EstadoChip(text: _estadoTexto),
-                    const SizedBox(height: 8),
-                    _CountdownDisplay(value: _countdown),
-                  ] else
-                    const Text('Presiona el botón para pedir ayuda.'),
-                ])
-              : _esCuidador
-                  ? _CaregiverView(items: _incoming, onAccept: _acceptIncoming, onDerive: _deriveIncoming)
-                  : const CircularProgressIndicator(),
-        ),
+        child: _isServicesInitialized
+            ? (_esAdultoMayor ? _buildVistaAdultoMayor() : _buildVistaCuidador())
+            : const CircularProgressIndicator(),
       ),
+    );
+  }
+
+  /// --- WIDGETS DE VISTA ESPECÍFICOS --- ///
+
+  Widget _buildVistaAdultoMayor() {
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Spacer(flex: 2),
+          SosBigButton(onPressed: _isRealTimeReady && _alertaId == null ? _onSosPressed : null),
+          const SizedBox(height: 24),
+          if (!_isRealTimeReady)
+            const _StatusChip(text: 'Conectando al servicio de alertas...', color: Colors.orange)
+          else if (_alertaId != null) ...[
+            _StatusChip(text: _estadoTexto, color: Theme.of(context).colorScheme.secondaryContainer),
+            const SizedBox(height: 8),
+            _CountdownDisplay(value: _countdown),
+          ] else
+            const _StatusChip(text: 'Presiona el botón para pedir ayuda', color: Colors.transparent),
+          const Spacer(flex: 3),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVistaCuidador() {
+    if (!_isRealTimeReady) {
+      return Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Card(
+          color: Colors.amber.shade100,
+          child: const Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Text(
+              '⚠️ No se pudo conectar al servicio de alertas. No recibirás notificaciones.\n\nRevisa tu conexión a internet e intenta reiniciar la aplicación.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontWeight: FontWeight.w500, height: 1.4),
+            ),
+          ),
+        ),
+      );
+    }
+    return _CaregiverView(
+      items: _incoming,
+      onAccept: _acceptIncoming,
+      onDerive: _deriveIncoming,
     );
   }
 }
 
+
 // ============================================================================
-// WIDGETS Y CLASES AUXILIARES
+// WIDGETS Y CLASES AUXILIARES (REDISEÑADOS)
 // ============================================================================
 class _IncomingAlert {
   final String alertaId;
@@ -285,15 +310,12 @@ class _IncomingAlert {
   final double? lat;
   final double? lon;
   _IncomingAlert({required this.alertaId, required this.orden, this.lat, this.lon});
-
-  factory _IncomingAlert.fromJson(Map<String, dynamic> json) {
-    return _IncomingAlert(
+  factory _IncomingAlert.fromJson(Map<String, dynamic> json) => _IncomingAlert(
       alertaId: json['alertaId'] as String,
       orden: (json['orden'] as num?)?.toInt() ?? 1,
       lat: (json['latitud'] as num?)?.toDouble(),
       lon: (json['longitud'] as num?)?.toDouble(),
     );
-  }
 }
 
 class _CaregiverView extends StatelessWidget {
@@ -305,11 +327,27 @@ class _CaregiverView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (items.isEmpty) {
-      return const Text('Sin emergencias por ahora.\nMantén la app abierta para recibir alertas.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16));
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.notifications_active_outlined, size: 80, color: Colors.grey.shade400),
+          const SizedBox(height: 16),
+          Text(
+            'Sin emergencias por ahora',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Mantén la app abierta para recibir alertas.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+          ),
+        ],
+      );
     }
-    return ListView.separated(
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
       itemCount: items.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (_, i) => _IncomingCard(item: items[i], onAccept: () => onAccept(items[i]), onDerive: () => onDerive(items[i])),
     );
   }
@@ -323,29 +361,27 @@ class _IncomingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ts = TimeOfDay.now();
-    final hh = ts.hour.toString().padLeft(2, '0');
-    final mm = ts.minute.toString().padLeft(2, '0');
-
     return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      elevation: 4,
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: const EdgeInsets.all(14.0),
+        padding: const EdgeInsets.all(16.0),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Alerta SOS', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            _InfoChip(label: 'ID', value: item.alertaId.substring(0, 6)),
-            _InfoChip(label: 'Orden', value: '${item.orden}'),
-            _InfoChip(label: 'Hora', value: '$hh:$mm'),
-            if (item.lat != null) _InfoChip(label: 'GPS', value: 'Disponible'),
-          ]),
+          Text('Alerta SOS Recibida', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
+          Row(
+            children: [
+              _InfoChip(icon: Icons.vpn_key_outlined, text: item.alertaId.substring(0, 6)),
+              const SizedBox(width: 8),
+              if (item.lat != null) const _InfoChip(icon: Icons.location_on_outlined, text: 'GPS Disponible'),
+            ],
+          ),
+          const SizedBox(height: 16),
           Row(children: [
-            Expanded(child: OutlinedButton.icon(onPressed: onDerive, icon: const Icon(Icons.redo), label: const Text('Derivar'))),
-            const SizedBox(width: 10),
-            Expanded(child: FilledButton.icon(onPressed: onAccept, icon: const Icon(Icons.directions_walk), label: const Text('Voy en camino'))),
+            Expanded(child: OutlinedButton(onPressed: onDerive, child: const Text('Derivar'))),
+            const SizedBox(width: 12),
+            Expanded(child: FilledButton(onPressed: onAccept, child: const Text('Voy en Camino'))),
           ]),
         ]),
       ),
@@ -354,17 +390,18 @@ class _IncomingCard extends StatelessWidget {
 }
 
 class _InfoChip extends StatelessWidget {
-  final String label;
-  final String value;
-  const _InfoChip({required this.label, required this.value});
+  final IconData icon;
+  final String text;
+  const _InfoChip({required this.icon, required this.text});
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5), borderRadius: BorderRadius.circular(20)),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(20)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Text('$label: ', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontWeight: FontWeight.w600)),
-        Text(value, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
+        Icon(icon, size: 16, color: Colors.grey.shade700),
+        const SizedBox(width: 6),
+        Text(text, style: TextStyle(fontWeight: FontWeight.w600, color: Colors.grey.shade800)),
       ]),
     );
   }
@@ -387,12 +424,8 @@ class SosBigButton extends StatelessWidget {
         height: diameter,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          gradient: LinearGradient(
-            colors: isEnabled
-                ? [const Color(0xFFFF6B6B), const Color(0xFFFF2E2E)]
-                : [Colors.grey.shade500, Colors.grey.shade700],
-          ),
-          boxShadow: [ BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 18, offset: const Offset(0, 8)) ],
+          color: isEnabled ? Colors.red : Colors.grey.shade400,
+          boxShadow: isEnabled ? [ BoxShadow(color: Colors.red.withOpacity(0.4), blurRadius: 25, spreadRadius: 5) ] : [],
         ),
         alignment: Alignment.center,
         child: const Text('SOS', style: TextStyle(fontSize: 64, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 6)),
@@ -405,23 +438,18 @@ class _CountdownDisplay extends StatelessWidget {
   final int value;
   const _CountdownDisplay({required this.value});
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5), borderRadius: BorderRadius.circular(12)),
-      child: Text('Derivación en: ${value.clamp(0, 999)} s', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-    );
-  }
+  Widget build(BuildContext context) => Text('Derivación en: ${value.clamp(0, 999)} s', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700));
 }
 
-class _EstadoChip extends StatelessWidget {
+class _StatusChip extends StatelessWidget {
   final String text;
-  const _EstadoChip({required this.text});
+  final Color color;
+  const _StatusChip({required this.text, required this.color});
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(color: Theme.of(context).colorScheme.secondaryContainer, borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
       child: Text(text, textAlign: TextAlign.center, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSecondaryContainer)),
     );
   }

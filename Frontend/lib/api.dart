@@ -2,11 +2,6 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class Api {
-  // ================= PUNTO CLAVE 1/1 =================
-  // Esta es la dirección de tu backend en la nube.
-  // Todas las peticiones HTTP estándar saldrán hacia esta URL.
-  // Asegúrate de que coincida con tu despliegue de Vercel.
-  // ===================================================
   static const String baseUrl = 'https://alerta-vital-nine.vercel.app';
 
   /// ---------- AUTENTICACIÓN ----------
@@ -55,30 +50,48 @@ class Api {
         'Content-Type': 'application/json',
       };
 
-  /// Buscar un usuario por correo
-  static Future<Map<String, dynamic>?> buscarUsuarioPorCorreo(String token, String correo) async {
-    final uri = Uri.parse('$baseUrl/api/usuarios/por-correo?correo=${Uri.encodeQueryComponent(correo)}');
-    final res = await http.get(uri, headers: _headers(token));
-    if (res.statusCode == 200) {
-      return Map<String, dynamic>.from(jsonDecode(res.body));
-    }
-    if (res.statusCode == 404) return null;
-    throw Exception('Error buscando usuario (${res.statusCode})');
-  }
-
-  /// Vincular adulto con cuidador (directo)
-  static Future<bool> vincularAdultoCuidador(
+  static Future<Map<String, dynamic>> solicitarVinculo(
     String token, {
-    required String adultoId,
-    required String cuidadorId,
+    required String? adultoCorreo,
+    required String? cuidadorCorreo,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/cuidadores/vincular');
+    final uri = Uri.parse('$baseUrl/api/cuidadores/solicitar');
     final res = await http.post(
       uri,
       headers: _headers(token),
-      body: jsonEncode({'adultoId': adultoId, 'cuidadorId': cuidadorId}),
+      body: jsonEncode({
+        'adultoCorreo': adultoCorreo,
+        'cuidadorCorreo': cuidadorCorreo,
+      }),
     );
-    return res.statusCode == 200 || res.statusCode == 201;
+    if (res.statusCode == 201) {
+      return Map<String, dynamic>.from(jsonDecode(res.body));
+    }
+    try {
+      final errorBody = jsonDecode(res.body);
+      throw Exception(errorBody['error'] ?? 'Error al solicitar vínculo (${res.statusCode})');
+    } catch (_) {
+      throw Exception('Error al solicitar vínculo (${res.statusCode})');
+    }
+  }
+
+  /// Aceptar una vinculación usando el token de invitación.
+  static Future<bool> aceptarVinculo(String token, String tokenDeVinculo) async {
+    final uri = Uri.parse('$baseUrl/api/cuidadores/aceptar');
+    final res = await http.post(
+      uri,
+      headers: _headers(token),
+      body: jsonEncode({'token': tokenDeVinculo}),
+    );
+    if (res.statusCode == 201) {
+      return true;
+    }
+    try {
+      final errorBody = jsonDecode(res.body);
+      throw Exception(errorBody['error'] ?? 'Error al aceptar el vínculo (${res.statusCode})');
+    } catch (_) {
+      throw Exception('Error al aceptar el vínculo (${res.statusCode})');
+    }
   }
 
   /// Listar cuidadores de un adulto
