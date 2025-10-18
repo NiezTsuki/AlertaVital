@@ -1,6 +1,5 @@
 // src/controllers/cuidadores.controller.js
 import jwt from 'jsonwebtoken';
-// 1. Importar Resend
 import { Resend } from 'resend';
 
 import {
@@ -12,11 +11,8 @@ import {
   listarAdultosDeCuidador,
 } from '../services/cuidadores.service.js';
 
-// 2. Añadir RESEND_API_KEY desde las variables de entorno
 const { JWT_SECRET = 'change_me', RESEND_API_KEY } = process.env;
 
-// 3. Crear una instancia de Resend
-// Asegúrate de haber añadido RESEND_API_KEY en Vercel
 const resend = new Resend(RESEND_API_KEY);
 
 // Permisos básicos: ADMIN, el propio adulto o el propio cuidador
@@ -35,14 +31,12 @@ export async function postSolicitarVinculo(req, res) {
     let { adultoCorreo, cuidadorCorreo } = req.body || {};
     let adulto, cuidador;
 
-    // Lógica existente para encontrar usuarios
     if (adultoCorreo) adulto = await getUserByCorreo(adultoCorreo);
     if (cuidadorCorreo) cuidador = await getUserByCorreo(cuidadorCorreo);
 
     if (!adulto) return res.status(404).json({ error: 'Adulto no encontrado por correo' });
     if (!cuidador) return res.status(404).json({ error: 'Cuidador no encontrado por correo' });
 
-    // Lógica de validación
     if (!canAct(req.user, [adulto.id, cuidador.id])) {
       return res.status(403).json({ error: 'No autorizado' });
     }
@@ -52,21 +46,19 @@ export async function postSolicitarVinculo(req, res) {
       return res.status(400).json({ error: 'No puedes vincular el mismo usuario' });
     }
 
-    // Creación del token de invitación
     const token = jwt.sign(
       { tipo: 'VINCULACION', adultoId: adulto.id, cuidadorId: cuidador.id, issuerId: req.user.sub },
       JWT_SECRET,
       { expiresIn: 60 * 60 * 24 } // 24h
     );
 
-    // ✅ 4. Lógica para enviar el correo electrónico
     const emisor = req.user.rol === 'ADULTO_MAYOR' ? adulto : cuidador;
     const receptor = req.user.rol === 'ADULTO_MAYOR' ? cuidador : adulto;
 
     try {
       await resend.emails.send({
-        // IMPORTANTE: Reemplaza con tu dominio verificado en Resend
-        from: 'AlertaVital <onboarding@resend.dev>>', 
+        // ✅ CORRECCIÓN: Se eliminó el '>' extra al final de la dirección.
+        from: 'AlertaVital <onboarding@resend.dev>', 
         to: [receptor.correo],
         subject: `💌 Tienes una invitación para vincularte en AlertaVital`,
         html: `
@@ -93,14 +85,14 @@ export async function postSolicitarVinculo(req, res) {
       console.log(`Correo de invitación enviado exitosamente a ${receptor.correo}`);
     } catch (emailError) {
       console.error("Error al enviar el correo con Resend:", emailError);
-      // Opcional: Podrías devolver un error aquí si el envío de correo es crítico,
-      // pero por ahora, solo lo registraremos y la API continuará.
+      // Devuelve un error al cliente si el correo falla, para un mejor feedback.
+      return res.status(500).json({ error: 'Se creó la solicitud, pero no se pudo enviar el correo de invitación.' });
     }
 
     return res.status(201).json({
       ok: true,
       message: 'Solicitud creada. Se ha enviado un correo a la contraparte para que acepte.',
-      token, // Aún se devuelve el token por si necesitan compartirlo manualmente
+      token,
     });
   } catch (e) {
     console.error(e);

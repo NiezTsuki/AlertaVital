@@ -1,10 +1,8 @@
-// src/routes/cuidadores.routes.js
 import { Router } from 'express';
 import { auth } from '../middleware/auth.js';
 import {
   postSolicitarVinculo,
   postAceptarVinculo,
-  postVincular,
   deleteDesvincular,
   getCuidadoresDeAdulto,
   getAdultosDeCuidador,
@@ -16,8 +14,7 @@ const router = Router();
 router.post('/cuidadores/solicitar', auth, postSolicitarVinculo);
 router.post('/cuidadores/aceptar', auth, postAceptarVinculo);
 
-// Flujo directo (opcional)
-router.post('/cuidadores/vincular', auth, postVincular);
+
 router.delete('/cuidadores/:adultoId/:cuidadorId', auth, deleteDesvincular);
 
 // Listados
