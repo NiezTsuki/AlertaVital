@@ -36,8 +36,20 @@ class RootPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthState>();
-    if (auth.isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    return auth.token != null ? const HomePage() : const LoginPage();
+
+    print("--- [RootPage] build() llamado. Estado: isLoading=${auth.isLoading}, token=${auth.token != null}, user=${auth.user != null}");
+
+    if (auth.isLoading) {
+      print("--- [RootPage] Decisión: Mostrar pantalla de carga principal.");
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (auth.token != null && auth.user != null) {
+      print("--- [RootPage] Decisión: NAVEGAR A HOMEPAGE.");
+      return const HomePage();
+    } else {
+      print("--- [RootPage] Decisión: NAVEGAR A LOGINPAGE.");
+      return const LoginPage();
+    }
   }
 }
-

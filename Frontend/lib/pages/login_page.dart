@@ -17,22 +17,39 @@ class _LoginPageState extends State<LoginPage> {
   String? _error;
 
   Future<void> _submit(AuthState auth) async {
+    // Esconde el teclado para que el usuario vea los mensajes de estado.
     FocusScope.of(context).unfocus();
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
     final ok = await auth.login(_emailCtrl.text.trim(), _passCtrl.text);
-    setState(() => _loading = false);
 
-    if (ok && mounted) {
-      Navigator.pushReplacementNamed(context, '/home');
-    } else {
-      setState(() => _error = 'Credenciales inválidas');
+    // ✅ CORRECCIÓN CLAVE:
+    // Después de la operación asíncrona (login), verificamos si el widget
+    // todavía existe en el árbol de widgets antes de continuar. Si el login
+    // fue exitoso, es probable que la app ya haya navegado a HomePage,
+    // por lo que detenemos la ejecución aquí para evitar el error.
+    if (!mounted) return;
+
+    // Si el login fue exitoso, la navegación es manejada por RootPage.
+    // Si no fue exitoso, actualizamos el estado para mostrar un error.
+    if (!ok) {
+      setState(() {
+        _loading = false;
+        _error = 'Credenciales inválidas. Inténtalo de nuevo.';
+      });
     }
+    // No necesitamos hacer nada si 'ok' es true, porque RootPage se encargará
+    // de la navegación automáticamente.
   }
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthState>();
+    // Usamos context.read aquí para pasar el AuthState a la función _submit
+    // sin causar reconstrucciones innecesarias del widget.
+    final auth = context.read<AuthState>();
 
     return Scaffold(
       body: SafeArea(
@@ -50,15 +67,14 @@ class _LoginPageState extends State<LoginPage> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const BrandHeader(size: 100), 
+                          const BrandHeader(size: 100),
                           const SizedBox(height: 24),
                           Align(
                             alignment: Alignment.centerLeft,
                             child: Text('Iniciar sesión',
-                              style: Theme.of(context).textTheme.headlineSmall),
+                                style: Theme.of(context).textTheme.headlineSmall),
                           ),
                           const SizedBox(height: 18),
-
                           TextField(
                             controller: _emailCtrl,
                             keyboardType: TextInputType.emailAddress,
@@ -66,9 +82,9 @@ class _LoginPageState extends State<LoginPage> {
                               labelText: 'Correo electrónico',
                               prefixIcon: Icon(Icons.alternate_email),
                             ),
+                            textInputAction: TextInputAction.next,
                           ),
                           const SizedBox(height: 14),
-
                           TextField(
                             controller: _passCtrl,
                             obscureText: true,
@@ -76,30 +92,35 @@ class _LoginPageState extends State<LoginPage> {
                               labelText: 'Contraseña',
                               prefixIcon: Icon(Icons.lock_outline),
                             ),
+                            onSubmitted: (_) => _submit(auth),
                           ),
                           const SizedBox(height: 14),
-
                           if (_error != null)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 8),
-                              child: Text(_error!,
-                                style: const TextStyle(color: Colors.redAccent, fontSize: 14),
+                              child: Text(
+                                _error!,
+                                style: const TextStyle(
+                                    color: Colors.redAccent, fontSize: 14),
                               ),
                             ),
-
                           SizedBox(
                             width: double.infinity,
                             height: 52,
                             child: FilledButton(
                               onPressed: _loading ? null : () => _submit(auth),
                               child: _loading
-                                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 3))
+                                  ? const SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(strokeWidth: 3))
                                   : const Text('Entrar'),
                             ),
                           ),
                           const SizedBox(height: 14),
                           TextButton(
-                            onPressed: () => Navigator.pushNamed(context, '/register'),
+                            onPressed: () =>
+                                Navigator.pushNamed(context, '/register'),
                             child: const Text('¿No tienes cuenta? Regístrate'),
                           ),
                         ],

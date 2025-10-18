@@ -34,18 +34,27 @@ class _HomePageState extends State<HomePage> {
   // ===== Getters de conveniencia =====
   bool get _esAdultoMayor => context.read<AuthState>().user?['rol'] == 'ADULTO_MAYOR';
   bool get _esCuidador => context.read<AuthState>().user?['rol'] == 'CUIDADOR';
-  String? get _token => context.read<AuthState>().token;
-  String? get _userId => context.read<AuthState>().user?['sub'];
 
   // ===== Ciclo de Vida del Widget =====
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final auth = context.watch<AuthState>();
-    if (!_isServicesInitialized && auth.token != null && auth.user != null) {
-      setState(() => _isServicesInitialized = true);
-      _initializeAuthenticatedServices();
-    }
+  void initState() {
+    super.initState();
+    // ✅ CORRECCIÓN: La inicialización se dispara aquí, de forma segura,
+    // después de que el widget se haya construido por primera vez.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final auth = context.read<AuthState>();
+      final token = auth.token;
+      // El 'user' y su 'id' vienen del flujo de autenticación anterior (RootPage).
+      final userId = auth.user?['id'] as String?;
+
+      if (token != null && userId != null) {
+        _initializeAuthenticatedServices(token, userId);
+      } else {
+        // Fallback de seguridad: si por alguna razón llegamos aquí sin datos, deslogueamos.
+        print("🔴 ERROR CRÍTICO: HomePage cargada sin datos de usuario. Forzando logout.");
+        _logout();
+      }
+    });
   }
 
   @override
@@ -58,25 +67,38 @@ class _HomePageState extends State<HomePage> {
   }
 
   // ===== Lógica de Inicialización y Pusher =====
-  void _initializeAuthenticatedServices() {
-    if (_token == null) return;
-    AlertasApi.configure(baseUrl: Api.baseUrl, token: _token!);
-    _sendLocationOnce();
-    _startHeartbeatUbicacion();
-    unawaited(AlertasApi.initPusher(
+  Future<void> _initializeAuthenticatedServices(String token, String userId) async {
+    if (_isServicesInitialized) return;
+
+    print("✅ Usuario autenticado ($userId). Inicializando servicios...");
+    AlertasApi.configure(baseUrl: Api.baseUrl, token: token);
+
+    await _sendLocationOnce(token);
+    _startHeartbeatUbicacion(token);
+
+    final success = await AlertasApi.initPusher(
       apiKey: '67c27146be09c306d1f7',
       cluster: 'us2',
-    ).then((success) {
-      if (mounted) {
-        setState(() => _isRealTimeReady = success);
-        if (success) _subscribeToUserChannel();
+    );
+
+    if (mounted) {
+      if (success) {
+        print("✅ Conexión con Pusher exitosa. Suscribiendo a canales...");
+        _subscribeToUserChannel(userId);
+      } else {
+        print("❌ Falló la conexión con Pusher.");
       }
-    }));
+      // Marcamos que la inicialización ha terminado y actualizamos la UI.
+      setState(() {
+        _isServicesInitialized = true;
+        _isRealTimeReady = success;
+      });
+    }
   }
 
-  Future<void> _subscribeToUserChannel() async {
-    if (_userId == null) return;
-    final userChannel = await AlertasApi.subscribeToChannel('private-user-$_userId');
+  Future<void> _subscribeToUserChannel(String userId) async {
+    final channelName = 'private-user-$userId';
+    final userChannel = await AlertasApi.subscribeToChannel(channelName);
     userChannel.onEvent = (event) {
       if (!mounted) return;
       switch (event.eventName) {
@@ -87,15 +109,15 @@ class _HomePageState extends State<HomePage> {
       }
     };
   }
-
-  // ===== Lógica de SOS y Handlers de Eventos (COMPLETA) =====
+  
+  // ===== Lógica de SOS y Handlers de Eventos =====
   Future<void> _onSosPressed() async {
     try {
       final pos = await _getCurrentPosition();
       final r = await AlertasApi.crearSOS(lat: pos?.latitude, lon: pos?.longitude, precision: pos?.accuracy);
       final id = r['alertaId']?.toString();
       if (id == null) throw Exception('No se pudo crear la alerta');
-
+      
       final alertaChannel = await AlertasApi.subscribeToChannel('private-alerta-$id');
       alertaChannel.onEvent = (event) {
         if (mounted && event.eventName == 'derivada_siguiente') _onDerivada(event);
@@ -138,7 +160,6 @@ class _HomePageState extends State<HomePage> {
     });
   }
   
-  // ===== Timers y GPS (COMPLETOS) =====
   void _startCountdown() {
     _sosTimer?.cancel();
     _sosTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -161,18 +182,19 @@ class _HomePageState extends State<HomePage> {
     });
   }
   void _stopAdultoTrail() => _adultoTrailTimer?.cancel();
-
-  void _startHeartbeatUbicacion() { 
+  
+  // ===== Timers y GPS =====
+  void _startHeartbeatUbicacion(String token) { 
     _hbTimer?.cancel();
     _hbTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
-      if (_token == null || !mounted) return;
-      await _sendLocationOnce();
+      if (!mounted) return;
+      await _sendLocationOnce(token);
     });
   }
   
-  Future<void> _sendLocationOnce() async {
+  Future<void> _sendLocationOnce(String token) async {
     final pos = await _getCurrentPosition();
-    if (pos != null && _token != null) {
+    if (pos != null) {
       try {
         await AlertasApi.registrarUbicacion(pos.latitude, pos.longitude, precision: pos.accuracy);
       } catch (_) {}
@@ -216,7 +238,7 @@ class _HomePageState extends State<HomePage> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al derivar: $e')));
     }
   }
-
+  
   void _goInvitar() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const VincularPage()));
   void _goAceptarVinculo() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AceptarVinculoPage()));
   void _goMisVinculos() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MisVinculosPage()));
@@ -243,14 +265,14 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       body: Center(
-        child: _isServicesInitialized
-            ? (_esAdultoMayor ? _buildVistaAdultoMayor() : _buildVistaCuidador())
-            : const CircularProgressIndicator(),
+        // ✅ CORRECCIÓN DEFINITIVA: La UI ahora depende de _isServicesInitialized.
+        // Mientras los servicios no se hayan inicializado, mostramos la rueda de carga.
+        child: !_isServicesInitialized
+            ? const CircularProgressIndicator()
+            : (_esAdultoMayor ? _buildVistaAdultoMayor() : _buildVistaCuidador()),
       ),
     );
   }
-
-  /// --- WIDGETS DE VISTA ESPECÍFICOS --- ///
 
   Widget _buildVistaAdultoMayor() {
     return Padding(
@@ -261,14 +283,15 @@ class _HomePageState extends State<HomePage> {
           const Spacer(flex: 2),
           SosBigButton(onPressed: _isRealTimeReady && _alertaId == null ? _onSosPressed : null),
           const SizedBox(height: 24),
-          if (!_isRealTimeReady)
-            const _StatusChip(text: 'Conectando al servicio de alertas...', color: Colors.orange)
-          else if (_alertaId != null) ...[
-            _StatusChip(text: _estadoTexto, color: Theme.of(context).colorScheme.secondaryContainer),
-            const SizedBox(height: 8),
-            _CountdownDisplay(value: _countdown),
-          ] else
-            const _StatusChip(text: 'Presiona el botón para pedir ayuda', color: Colors.transparent),
+          !_isRealTimeReady
+              ? const _StatusChip(text: 'Conectando al servicio de alertas...', color: Colors.orange)
+              : _alertaId != null 
+                ? Column(children: [
+                    _StatusChip(text: _estadoTexto, color: Theme.of(context).colorScheme.secondaryContainer),
+                    const SizedBox(height: 8),
+                    _CountdownDisplay(value: _countdown),
+                  ])
+                : const _StatusChip(text: 'Presiona el botón para pedir ayuda', color: Colors.transparent),
           const Spacer(flex: 3),
         ],
       ),
@@ -302,7 +325,7 @@ class _HomePageState extends State<HomePage> {
 
 
 // ============================================================================
-// WIDGETS Y CLASES AUXILIARES (REDISEÑADOS)
+// WIDGETS Y CLASES AUXILIARES (Sin cambios)
 // ============================================================================
 class _IncomingAlert {
   final String alertaId;
@@ -327,29 +350,9 @@ class _CaregiverView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (items.isEmpty) {
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.notifications_active_outlined, size: 80, color: Colors.grey.shade400),
-          const SizedBox(height: 16),
-          Text(
-            'Sin emergencias por ahora',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Mantén la app abierta para recibir alertas.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
-          ),
-        ],
-      );
+      return Column( mainAxisAlignment: MainAxisAlignment.center, children: [ Icon(Icons.notifications_active_outlined, size: 80, color: Colors.grey.shade400), const SizedBox(height: 16), Text('Sin emergencias por ahora', style: Theme.of(context).textTheme.headlineSmall), const SizedBox(height: 8), Text('Mantén la app abierta para recibir alertas.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey.shade600)), ], );
     }
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: items.length,
-      itemBuilder: (_, i) => _IncomingCard(item: items[i], onAccept: () => onAccept(items[i]), onDerive: () => onDerive(items[i])),
-    );
+    return ListView.builder( padding: const EdgeInsets.all(16), itemCount: items.length, itemBuilder: (_, i) => _IncomingCard(item: items[i], onAccept: () => onAccept(items[i]), onDerive: () => onDerive(items[i])), );
   }
 }
 
@@ -361,31 +364,7 @@ class _IncomingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 4,
-      margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Alerta SOS Recibida', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              _InfoChip(icon: Icons.vpn_key_outlined, text: item.alertaId.substring(0, 6)),
-              const SizedBox(width: 8),
-              if (item.lat != null) const _InfoChip(icon: Icons.location_on_outlined, text: 'GPS Disponible'),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(children: [
-            Expanded(child: OutlinedButton(onPressed: onDerive, child: const Text('Derivar'))),
-            const SizedBox(width: 12),
-            Expanded(child: FilledButton(onPressed: onAccept, child: const Text('Voy en Camino'))),
-          ]),
-        ]),
-      ),
-    );
+    return Card( elevation: 4, margin: const EdgeInsets.only(bottom: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), child: Padding( padding: const EdgeInsets.all(16.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [ Text('Alerta SOS Recibida', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)), const SizedBox(height: 12), Row( children: [ _InfoChip(icon: Icons.vpn_key_outlined, text: item.alertaId.substring(0, 6)), const SizedBox(width: 8), if (item.lat != null) const _InfoChip(icon: Icons.location_on_outlined, text: 'GPS Disponible'), ], ), const SizedBox(height: 16), Row(children: [ Expanded(child: OutlinedButton(onPressed: onDerive, child: const Text('Derivar'))), const SizedBox(width: 12), Expanded(child: FilledButton(onPressed: onAccept, child: const Text('Voy en Camino'))), ]), ]), ), );
   }
 }
 
@@ -395,15 +374,7 @@ class _InfoChip extends StatelessWidget {
   const _InfoChip({required this.icon, required this.text});
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(20)),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 16, color: Colors.grey.shade700),
-        const SizedBox(width: 6),
-        Text(text, style: TextStyle(fontWeight: FontWeight.w600, color: Colors.grey.shade800)),
-      ]),
-    );
+    return Container( padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(20)), child: Row(mainAxisSize: MainAxisSize.min, children: [ Icon(icon, size: 16, color: Colors.grey.shade700), const SizedBox(width: 6), Text(text, style: TextStyle(fontWeight: FontWeight.w600, color: Colors.grey.shade800)), ]), );
   }
 }
 
@@ -415,22 +386,7 @@ class SosBigButton extends StatelessWidget {
     final bool isEnabled = onPressed != null;
     final size = MediaQuery.of(context).size;
     final diameter = (size.width * 0.65).clamp(200.0, 380.0);
-
-    return InkWell(
-      onTap: onPressed,
-      borderRadius: BorderRadius.circular(diameter / 2),
-      child: Container(
-        width: diameter,
-        height: diameter,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: isEnabled ? Colors.red : Colors.grey.shade400,
-          boxShadow: isEnabled ? [ BoxShadow(color: Colors.red.withOpacity(0.4), blurRadius: 25, spreadRadius: 5) ] : [],
-        ),
-        alignment: Alignment.center,
-        child: const Text('SOS', style: TextStyle(fontSize: 64, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 6)),
-      ),
-    );
+    return InkWell( onTap: onPressed, borderRadius: BorderRadius.circular(diameter / 2), child: Container( width: diameter, height: diameter, decoration: BoxDecoration( shape: BoxShape.circle, color: isEnabled ? Colors.red : Colors.grey.shade400, boxShadow: isEnabled ? [ BoxShadow(color: Colors.red.withOpacity(0.4), blurRadius: 25, spreadRadius: 5) ] : [], ), alignment: Alignment.center, child: const Text('SOS', style: TextStyle(fontSize: 64, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 6)), ), );
   }
 }
 
@@ -447,10 +403,6 @@ class _StatusChip extends StatelessWidget {
   const _StatusChip({required this.text, required this.color});
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
-      child: Text(text, textAlign: TextAlign.center, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSecondaryContainer)),
-    );
+    return Container( padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8), decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)), child: Text(text, textAlign: TextAlign.center, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSecondaryContainer)), );
   }
 }
