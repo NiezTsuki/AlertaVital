@@ -1,4 +1,3 @@
-// lib/pages/home_page.dart
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -24,81 +23,16 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  // ... (código existente) ...
+  // ===== Estados de la UI y Flujo =====
+  Timer? _sosTimer, _adultoTrailTimer, _hbTimer;
+  int _countdown = 0;
+  String? _alertaId;
+  String _estadoTexto = 'Listo para ayudar';
+  final List<_IncomingAlert> _incoming = [];
+  bool _isServicesInitialized = false;
+  bool _isRealTimeReady = false;
 
-  Future<void> _initializeAuthenticatedServices(String token, String userId) async {
-    if (_isServicesInitialized) return;
-
-    print("✅ Usuario autenticado ($userId). Inicializando servicios...");
-    AlertasApi.configure(baseUrl: Api.baseUrl, token: token);
-
-    await _initNotifications();
-    
-    if (_esCuidador) {
-      await _fetchPendingAlerts();
-    }
-
-    await _sendLocationOnce(token);
-    _startHeartbeatUbicacion(token);
-
-    final success = await AlertasApi.initPusher(
-      apiKey: '67c27146be09c306d1f7',
-      cluster: 'us2',
-    );
-
-    if (mounted) {
-      if (success) {
-        print("✅ Conexión con Pusher exitosa. Suscribiendo a canales...");
-        _subscribeToUserChannel(userId);
-      } else {
-        print("❌ Falló la conexión con Pusher.");
-      }
-      setState(() {
-        _isServicesInitialized = true;
-        _isRealTimeReady = success;
-      });
-    }
-  }
-
-  Future<void> _initNotifications() async {
-    final messaging = FirebaseMessaging.instance;
-    await messaging.requestPermission();
-
-    try {
-      final fcmToken = await messaging.getToken();
-      if (fcmToken != null) {
-        print('📱 Firebase Messaging Token: $fcmToken');
-        await AlertasApi.registrarFcmToken(fcmToken);
-      }
-    } catch (e) {
-      print('🚨 Error al obtener o registrar el token FCM: $e');
-    }
-
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      // ✅ SINTAXIS CORREGIDA
-      print('🔔 Notificación recibida en primer plano!');
-      if (message.notification != null) {
-        print('Mensaje: ${message.notification!.body}');
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message.notification!.title ?? 'Nueva Notificación'),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-          ),
-        );
-
-        if (_esCuidador) {
-          _fetchPendingAlerts();
-        }
-      }
-    });
-  }
-
-  // ... (el resto del archivo no necesita cambios)
-  // ...
-  // ... (el resto del archivo no necesita cambios)
-  // ...
-
+  // ===== Getters de conveniencia =====
   bool get _esAdultoMayor => context.read<AuthState>().user?['rol'] == 'ADULTO_MAYOR';
   bool get _esCuidador => context.read<AuthState>().user?['rol'] == 'CUIDADOR';
 
@@ -128,30 +62,111 @@ class _HomePageState extends State<HomePage> {
     AlertasApi.dispose();
     super.dispose();
   }
-  Timer? _sosTimer, _adultoTrailTimer, _hbTimer;
-  int _countdown = 0;
-  String? _alertaId;
-  String _estadoTexto = 'Listo para ayudar';
-  final List<_IncomingAlert> _incoming = [];
-  bool _isServicesInitialized = false;
-  bool _isRealTimeReady = false;
+
+  // ===== Lógica de Inicialización y Permisos =====
+  Future<void> _initializeAuthenticatedServices(String token, String userId) async {
+    if (_isServicesInitialized) return;
+
+    print("✅ Usuario autenticado ($userId). Inicializando servicios...");
+    AlertasApi.configure(baseUrl: Api.baseUrl, token: token);
+
+    // Solicita todos los permisos necesarios al inicio.
+    await _requestEssentialPermissions();
+    
+    if (_esCuidador) {
+      await _fetchPendingAlerts();
+    }
+
+    // Inicia el reporte de ubicación
+    await _sendLocationOnce(token);
+    _startHeartbeatUbicacion(token);
+
+    // Conecta con Pusher para eventos en tiempo real
+    final success = await AlertasApi.initPusher(
+      apiKey: '67c27146be09c306d1f7',
+      cluster: 'us2',
+    );
+
+    if (mounted) {
+      if (success) {
+        print("✅ Conexión con Pusher exitosa. Suscribiendo a canales...");
+        _subscribeToUserChannel(userId);
+      } else {
+        print("❌ Falló la conexión con Pusher.");
+      }
+      setState(() {
+        _isServicesInitialized = true;
+        _isRealTimeReady = success;
+      });
+    }
+  }
+
+  Future<void> _requestEssentialPermissions() async {
+    // 1. Pide permiso para notificaciones
+    final messaging = FirebaseMessaging.instance;
+    await messaging.requestPermission();
+
+    // 2. Pide permiso para ubicación
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    
+    if (permission == LocationPermission.deniedForever) {
+      // Si el usuario niega el permiso permanentemente, es bueno informarle.
+      if(mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('El permiso de ubicación fue negado permanentemente. La app no funcionará correctamente.'))
+        );
+      }
+    }
+
+    // 3. Inicializa la lógica de notificaciones (obtener y registrar token)
+    await _initNotifications(messaging);
+  }
+
+  Future<void> _initNotifications(FirebaseMessaging messaging) async {
+    try {
+      final fcmToken = await messaging.getToken();
+      if (fcmToken != null) {
+        print('📱 Firebase Messaging Token: $fcmToken');
+        await AlertasApi.registrarFcmToken(fcmToken);
+      }
+    } catch (e) {
+      print('🚨 Error al obtener o registrar el token FCM: $e');
+    }
+
+    // Listener para notificaciones en primer plano
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print('🔔 Notificación recibida en primer plano!');
+      if (message.notification != null) {
+        print('Mensaje: ${message.notification!.body}');
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message.notification!.title ?? 'Nueva Notificación'),
+            backgroundColor: Theme.of(context).colorScheme.primary,
+          ),
+        );
+
+        if (_esCuidador) {
+          _fetchPendingAlerts();
+        }
+      }
+    });
+  }
 
   Future<void> _fetchPendingAlerts() async {
     try {
       print("[HomePage] Buscando alertas pendientes...");
       final pending = await AlertasApi.getAlertasPendientes();
-      if (pending.isNotEmpty) {
+      if (pending.isNotEmpty && mounted) {
         print("[HomePage] Se encontraron ${pending.length} alertas pendientes. Actualizando UI...");
-        final newAlerts = pending
-            .map((data) => _IncomingAlert.fromJson(data as Map<String, dynamic>))
-            .toList();
-
-        if (mounted) {
-          setState(() {
-            _incoming.clear();
-            _incoming.addAll(newAlerts);
-          });
-        }
+        final newAlerts = pending.map((data) => _IncomingAlert.fromJson(data as Map<String, dynamic>)).toList();
+        setState(() {
+          _incoming.clear();
+          _incoming.addAll(newAlerts);
+        });
       } else {
         print("[HomePage] No hay alertas pendientes.");
       }
@@ -164,7 +179,6 @@ class _HomePageState extends State<HomePage> {
     final channelName = 'private-user-$userId';
     final userChannel = await AlertasApi.subscribeToChannel(channelName);
     userChannel.onEvent = (event) {
-      print('<<<<< [PUSHER EVENT RECIBIDO] Evento: ${event.eventName}, Datos: ${event.data} >>>>>');
       if (!mounted) return;
       
       switch (event.eventName) {
@@ -173,9 +187,7 @@ class _HomePageState extends State<HomePage> {
         case 'alerta_emergencia': _onEmergencia(event); break;
         case 'asignacion_expirada': _onAsignacionExpirada(event); break;
         case 'alerta_nueva': 
-          if (_esCuidador) {
-            _onAlertaNueva(event); 
-          }
+          if (_esCuidador) _onAlertaNueva(event); 
           break;
       }
     };
@@ -185,7 +197,12 @@ class _HomePageState extends State<HomePage> {
   Future<void> _onSosPressed() async {
     try {
       final pos = await _getCurrentPosition();
-      final r = await AlertasApi.crearSOS(lat: pos?.latitude, lon: pos?.longitude, precision: pos?.accuracy);
+      if (pos == null) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo obtener la ubicación. Activa el GPS y concede los permisos.')));
+        return;
+      }
+
+      final r = await AlertasApi.crearSOS(lat: pos.latitude, lon: pos.longitude, precision: pos.accuracy);
       final id = r['alertaId']?.toString();
       if (id == null) throw Exception('No se pudo crear la alerta');
       
@@ -202,7 +219,7 @@ class _HomePageState extends State<HomePage> {
       _startCountdown();
       _startAdultoTrail();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al crear alerta: $e')));
     }
   }
 
@@ -211,13 +228,9 @@ class _HomePageState extends State<HomePage> {
       final data = jsonDecode(event.data!);
       final alertaId = data['alertaId'] as String?;
       if (alertaId == null) return;
-
       final index = _incoming.indexWhere((a) => a.alertaId == alertaId);
       if (index != -1) {
-        print('[HomePage] Marcando alerta $alertaId como expirada.');
-        setState(() {
-          _incoming[index].isExpired = true;
-        });
+        setState(() => _incoming[index].isExpired = true);
       }
     } catch (e) {
       print('Error al procesar asignacion_expirada: $e');
@@ -230,14 +243,11 @@ class _HomePageState extends State<HomePage> {
       final data = jsonDecode(event.data!);
       final alertaId = data['alertaId']?.toString();
       if (alertaId == null) return;
-
       if (!_incoming.any((a) => a.alertaId == alertaId)) {
-        setState(() {
-          _incoming.insert(0, _IncomingAlert.fromJson(data));
-        });
+        setState(() => _incoming.insert(0, _IncomingAlert.fromJson(data)));
       }
     } catch (e) {
-      print('💥💥💥 [onAlertaNueva] ERROR CRÍTICO al procesar el evento: $e 💥💥💥');
+      print('💥 ERROR al procesar alerta_nueva: $e 💥');
     }
   }
 
@@ -279,12 +289,10 @@ class _HomePageState extends State<HomePage> {
   }
   void _stopAdultoTrail() => _adultoTrailTimer?.cancel();
   
-  // ===== Timers y GPS =====
   void _startHeartbeatUbicacion(String token) { 
     _hbTimer?.cancel();
     _hbTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
-      if (!mounted) return;
-      await _sendLocationOnce(token);
+      if (mounted) await _sendLocationOnce(token);
     });
   }
   
@@ -300,14 +308,18 @@ class _HomePageState extends State<HomePage> {
   Future<Position?> _getCurrentPosition() async {
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) return null;
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
+      if (!serviceEnabled) {
+        print("GPS deshabilitado.");
+        return null;
       }
-      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) return null;
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        print("Permiso de ubicación denegado.");
+        return null;
+      }
       return await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-    } catch (_) {
+    } catch (e) {
+      print("Error obteniendo posición: $e");
       return null;
     }
   }
@@ -417,6 +429,9 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
+// ============================================================================
+// WIDGETS Y CLASES AUXILIARES (Sin cambios)
+// ============================================================================
 class _IncomingAlert {
   final String alertaId;
   final int orden;

@@ -1,5 +1,5 @@
 import Pusher from 'pusher';
-import admin from 'firebase-admin'; 
+import admin from 'firebase-admin';
 import { pool } from '../db/pool.js';
 import { config } from '../config/env.js';
 
@@ -23,7 +23,7 @@ const pusher = new Pusher({
   useTLS: true
 });
 
-// ✅ FUNCIÓN AUXILIAR PARA ENVIAR NOTIFICACIONES PUSH
+// FUNCIÓN AUXILIAR PARA ENVIAR NOTIFICACIONES PUSH
 async function sendPushNotification(userId, title, body, data) {
   if (!admin.apps.length) {
     console.warn('[FCM] Firebase Admin no está inicializado. No se enviará la notificación.');

@@ -27,4 +27,6 @@ export const config = {
   pusherSecret:  process.env.PUSHER_SECRET,
   pusherCluster: process.env.PUSHER_CLUSTER,
   // ✅ ============= FIN DE LA CORRECCIÓN ============= ✅
+
+  firebaseServiceAccountJson: process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
 };
