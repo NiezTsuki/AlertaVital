@@ -3,17 +3,21 @@ import admin from 'firebase-admin';
 import { pool } from '../db/pool.js';
 import { config } from '../config/env.js';
 
-
+// INICIALIZA FIREBASE ADMIN SDK
 if (!admin.apps.length && config.firebaseServiceAccountJson) {
   try {
+    const serviceAccount = JSON.parse(config.firebaseServiceAccountJson);
     admin.initializeApp({
-      credential: admin.credential.cert(JSON.parse(config.firebaseServiceAccountJson)),
+      credential: admin.credential.cert(serviceAccount),
     });
-    console.log('[FCM] Firebase Admin SDK inicializado correctamente.');
+    console.log(`[FCM] Firebase Admin SDK inicializado para proyecto: ${serviceAccount.project_id}`);
   } catch (e) {
-    console.error('[FCM] Error al inicializar Firebase Admin SDK. Asegúrate de que la variable de entorno FIREBASE_SERVICE_ACCOUNT_JSON sea correcta.', e);
+    console.error('[FCM] Error al inicializar Firebase Admin SDK. Revisa la variable de entorno FIREBASE_SERVICE_ACCOUNT_JSON.', e.message);
   }
+} else if (!config.firebaseServiceAccountJson) {
+    console.warn('[FCM] La variable de entorno FIREBASE_SERVICE_ACCOUNT_JSON no fue encontrada. No se enviarán notificaciones push.');
 }
+
 
 const pusher = new Pusher({
   appId: config.pusherAppId,
