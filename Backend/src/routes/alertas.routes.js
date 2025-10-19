@@ -1,8 +1,33 @@
+// src/routes/alertas.routes.js
+
 import { Router } from 'express';
 import { auth } from '../middleware/auth.js';
-import { crearAlertaRT, aceptarAlerta, derivarAlerta, completarAlerta } from '../services/alertas.service.js';
+// Se añade la nueva función importada del servicio
+import { 
+  crearAlertaRT, 
+  aceptarAlerta, 
+  derivarAlerta, 
+  completarAlerta, 
+  getAlertasPendientesDeCuidador 
+} from '../services/alertas.service.js';
 
 const router = Router();
+
+// ✅ NUEVA RUTA
+// Devuelve las alertas que están asignadas al cuidador logueado y en estado 'PENDIENTE'.
+router.get('/alertas/pendientes', auth, async (req, res) => {
+  try {
+    if (req.user?.rol !== 'CUIDADOR') {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+    
+    const alertas = await getAlertasPendientesDeCuidador(req.user.sub);
+    res.json(alertas);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'No se pudo obtener las alertas pendientes' });
+  }
+});
 
 // Adulto mayor emite SOS/CAIDA (con coords si están disponibles)
 router.post('/alertas/sos', auth, async (req, res) => {

@@ -39,18 +39,14 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    // ✅ CORRECCIÓN: La inicialización se dispara aquí, de forma segura,
-    // después de que el widget se haya construido por primera vez.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final auth = context.read<AuthState>();
       final token = auth.token;
-      // El 'user' y su 'id' vienen del flujo de autenticación anterior (RootPage).
       final userId = auth.user?['id'] as String?;
 
       if (token != null && userId != null) {
         _initializeAuthenticatedServices(token, userId);
       } else {
-        // Fallback de seguridad: si por alguna razón llegamos aquí sin datos, deslogueamos.
         print("🔴 ERROR CRÍTICO: HomePage cargada sin datos de usuario. Forzando logout.");
         _logout();
       }
@@ -73,6 +69,11 @@ class _HomePageState extends State<HomePage> {
     print("✅ Usuario autenticado ($userId). Inicializando servicios...");
     AlertasApi.configure(baseUrl: Api.baseUrl, token: token);
 
+    // ✅ MODIFICACIÓN: Si es cuidador, busca alertas pendientes ANTES de conectar a Pusher.
+    if (_esCuidador) {
+      await _fetchPendingAlerts();
+    }
+
     await _sendLocationOnce(token);
     _startHeartbeatUbicacion(token);
 
@@ -88,7 +89,6 @@ class _HomePageState extends State<HomePage> {
       } else {
         print("❌ Falló la conexión con Pusher.");
       }
-      // Marcamos que la inicialización ha terminado y actualizamos la UI.
       setState(() {
         _isServicesInitialized = true;
         _isRealTimeReady = success;
@@ -96,16 +96,51 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // ✅ NUEVA FUNCIÓN
+  // Llama a la API para obtener alertas pendientes y actualiza el estado si encuentra alguna.
+  Future<void> _fetchPendingAlerts() async {
+    try {
+      print("[HomePage] Buscando alertas pendientes...");
+      final pending = await AlertasApi.getAlertasPendientes();
+      if (pending.isNotEmpty) {
+        print("[HomePage] Se encontraron ${pending.length} alertas pendientes. Actualizando UI...");
+        final newAlerts = pending
+            .map((data) => _IncomingAlert.fromJson(data as Map<String, dynamic>))
+            .toList();
+
+        if (mounted) {
+          setState(() {
+            _incoming.clear();
+            _incoming.addAll(newAlerts);
+          });
+        }
+      } else {
+        print("[HomePage] No hay alertas pendientes.");
+      }
+    } catch (e) {
+      print("🚨 Error al buscar alertas pendientes: $e");
+    }
+  }
+
   Future<void> _subscribeToUserChannel(String userId) async {
     final channelName = 'private-user-$userId';
     final userChannel = await AlertasApi.subscribeToChannel(channelName);
     userChannel.onEvent = (event) {
+      print('<<<<< [PUSHER EVENT RECIBIDO] Evento: ${event.eventName}, Datos: ${event.data} >>>>>');
       if (!mounted) return;
+      print('[HomePage] Verificando condición del rol. _esCuidador = $_esCuidador');
+      
       switch (event.eventName) {
         case 'cuidador_en_camino': _onEnCamino(event); break;
         case 'alerta_completada': _onCompletada(event); break;
         case 'alerta_emergencia': _onEmergencia(event); break;
-        case 'alerta_nueva': if (_esCuidador) _onAlertaNueva(event); break;
+        case 'alerta_nueva': 
+          if (_esCuidador) {
+            _onAlertaNueva(event); 
+          } else {
+            print('[HomePage] Evento "alerta_nueva" ignorado porque _esCuidador es false.');
+          }
+          break;
       }
     };
   }
@@ -136,12 +171,30 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _onAlertaNueva(PusherEvent event) {
-    if (event.data == null) return;
-    final data = jsonDecode(event.data!);
-    final alertaId = data['alertaId']?.toString();
-    if (alertaId == null) return;
-    if (!_incoming.any((a) => a.alertaId == alertaId)) {
-      setState(() => _incoming.insert(0, _IncomingAlert.fromJson(data)));
+    print('[onAlertaNueva] Handler invocado.');
+    try {
+      if (event.data == null) {
+        print('[onAlertaNueva] Error: event.data es nulo.');
+        return;
+      }
+      final data = jsonDecode(event.data!);
+      final alertaId = data['alertaId']?.toString();
+      if (alertaId == null) {
+        print('[onAlertaNueva] Error: alertaId no encontrado en los datos.');
+        return;
+      }
+
+      if (!_incoming.any((a) => a.alertaId == alertaId)) {
+        print('[onAlertaNueva] Alerta nueva ($alertaId) no es un duplicado. Añadiendo a la lista...');
+        setState(() {
+          _incoming.insert(0, _IncomingAlert.fromJson(data));
+        });
+        print('[onAlertaNueva] setState llamado. UI debería actualizarse.');
+      } else {
+        print('[onAlertaNueva] Alerta ($alertaId) ya existe en la lista. Ignorando.');
+      }
+    } catch (e) {
+      print('💥💥💥 [onAlertaNueva] ERROR CRÍTICO al procesar el evento: $e 💥💥💥');
     }
   }
 
@@ -265,8 +318,6 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       body: Center(
-        // ✅ CORRECCIÓN DEFINITIVA: La UI ahora depende de _isServicesInitialized.
-        // Mientras los servicios no se hayan inicializado, mostramos la rueda de carga.
         child: !_isServicesInitialized
             ? const CircularProgressIndicator()
             : (_esAdultoMayor ? _buildVistaAdultoMayor() : _buildVistaCuidador()),

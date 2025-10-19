@@ -181,3 +181,22 @@ export async function completarAlerta({ alertaId, cuidadorId }) {
   pusher.trigger(`private-alerta-${alertaId}`, 'alerta_completada', { alertaId });
   return true;
 }
+
+// ✅ NUEVA FUNCIÓN
+// Se encarga de buscar en la base de datos si hay alertas pendientes para un cuidador específico.
+export async function getAlertasPendientesDeCuidador(cuidadorId) {
+  const q = `
+    SELECT
+      a.id AS "alertaId",
+      aa.orden,
+      a.latitud,
+      a.longitud,
+      a.precision_metros
+    FROM alertas_asignaciones aa
+    JOIN alertas a ON a.id = aa.alerta_id
+    WHERE aa.cuidador_id = $1 AND aa.estado = 'PENDIENTE'
+    ORDER BY a.creado_en DESC
+  `;
+  const { rows } = await pool.query(q, [cuidadorId]);
+  return rows;
+}

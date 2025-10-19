@@ -40,6 +40,14 @@ class AlertasApi {
   }
 
   // ===== Endpoints de API REST =====
+  
+  // ✅ NUEVO MÉTODO
+  // Llama a la nueva ruta del backend para obtener las alertas que no se vieron.
+  static Future<List<dynamic>> getAlertasPendientes() async {
+    final resp = await http.get(_uri('/api/alertas/pendientes'), headers: _headers());
+    return _parse(resp) ?? [];
+  }
+
   static Future<Map<String, dynamic>> crearSOS({double? lat, double? lon, double? precision}) async {
     final body = <String, dynamic>{
       'tipo': 'SOS',
