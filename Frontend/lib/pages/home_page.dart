@@ -68,8 +68,7 @@ class _HomePageState extends State<HomePage> {
 
     print("✅ Usuario autenticado ($userId). Inicializando servicios...");
     AlertasApi.configure(baseUrl: Api.baseUrl, token: token);
-
-    // ✅ MODIFICACIÓN: Si es cuidador, busca alertas pendientes ANTES de conectar a Pusher.
+    
     if (_esCuidador) {
       await _fetchPendingAlerts();
     }
@@ -96,8 +95,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // ✅ NUEVA FUNCIÓN
-  // Llama a la API para obtener alertas pendientes y actualiza el estado si encuentra alguna.
   Future<void> _fetchPendingAlerts() async {
     try {
       print("[HomePage] Buscando alertas pendientes...");
@@ -128,17 +125,15 @@ class _HomePageState extends State<HomePage> {
     userChannel.onEvent = (event) {
       print('<<<<< [PUSHER EVENT RECIBIDO] Evento: ${event.eventName}, Datos: ${event.data} >>>>>');
       if (!mounted) return;
-      print('[HomePage] Verificando condición del rol. _esCuidador = $_esCuidador');
       
       switch (event.eventName) {
         case 'cuidador_en_camino': _onEnCamino(event); break;
         case 'alerta_completada': _onCompletada(event); break;
         case 'alerta_emergencia': _onEmergencia(event); break;
+        case 'asignacion_expirada': _onAsignacionExpirada(event); break;
         case 'alerta_nueva': 
           if (_esCuidador) {
             _onAlertaNueva(event); 
-          } else {
-            print('[HomePage] Evento "alerta_nueva" ignorado porque _esCuidador es false.');
           }
           break;
       }
@@ -170,28 +165,35 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _onAlertaNueva(PusherEvent event) {
-    print('[onAlertaNueva] Handler invocado.');
+  void _onAsignacionExpirada(PusherEvent event) {
     try {
-      if (event.data == null) {
-        print('[onAlertaNueva] Error: event.data es nulo.');
-        return;
+      final data = jsonDecode(event.data!);
+      final alertaId = data['alertaId'] as String?;
+      if (alertaId == null) return;
+
+      final index = _incoming.indexWhere((a) => a.alertaId == alertaId);
+      if (index != -1) {
+        print('[HomePage] Marcando alerta $alertaId como expirada.');
+        setState(() {
+          _incoming[index].isExpired = true;
+        });
       }
+    } catch (e) {
+      print('Error al procesar asignacion_expirada: $e');
+    }
+  }
+
+  void _onAlertaNueva(PusherEvent event) {
+    try {
+      if (event.data == null) return;
       final data = jsonDecode(event.data!);
       final alertaId = data['alertaId']?.toString();
-      if (alertaId == null) {
-        print('[onAlertaNueva] Error: alertaId no encontrado en los datos.');
-        return;
-      }
+      if (alertaId == null) return;
 
       if (!_incoming.any((a) => a.alertaId == alertaId)) {
-        print('[onAlertaNueva] Alerta nueva ($alertaId) no es un duplicado. Añadiendo a la lista...');
         setState(() {
           _incoming.insert(0, _IncomingAlert.fromJson(data));
         });
-        print('[onAlertaNueva] setState llamado. UI debería actualizarse.');
-      } else {
-        print('[onAlertaNueva] Alerta ($alertaId) ya existe en la lista. Ignorando.');
       }
     } catch (e) {
       print('💥💥💥 [onAlertaNueva] ERROR CRÍTICO al procesar el evento: $e 💥💥💥');
@@ -304,7 +306,7 @@ class _HomePageState extends State<HomePage> {
     Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginPage()), (route) => false);
   }
 
-  // ===== Construcción de la UI (REDISEÑADA) =====
+  // ===== Construcción de la UI =====
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -374,16 +376,25 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
+// ============================================================================
+// WIDGETS Y CLASES AUXILIARES
+// ============================================================================
 
-// ============================================================================
-// WIDGETS Y CLASES AUXILIARES (Sin cambios)
-// ============================================================================
 class _IncomingAlert {
   final String alertaId;
   final int orden;
   final double? lat;
   final double? lon;
-  _IncomingAlert({required this.alertaId, required this.orden, this.lat, this.lon});
+  bool isExpired;
+
+  _IncomingAlert({
+    required this.alertaId,
+    required this.orden,
+    this.lat,
+    this.lon,
+    this.isExpired = false,
+  });
+
   factory _IncomingAlert.fromJson(Map<String, dynamic> json) => _IncomingAlert(
       alertaId: json['alertaId'] as String,
       orden: (json['orden'] as num?)?.toInt() ?? 1,
@@ -415,7 +426,59 @@ class _IncomingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card( elevation: 4, margin: const EdgeInsets.only(bottom: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), child: Padding( padding: const EdgeInsets.all(16.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [ Text('Alerta SOS Recibida', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)), const SizedBox(height: 12), Row( children: [ _InfoChip(icon: Icons.vpn_key_outlined, text: item.alertaId.substring(0, 6)), const SizedBox(width: 8), if (item.lat != null) const _InfoChip(icon: Icons.location_on_outlined, text: 'GPS Disponible'), ], ), const SizedBox(height: 16), Row(children: [ Expanded(child: OutlinedButton(onPressed: onDerive, child: const Text('Derivar'))), const SizedBox(width: 12), Expanded(child: FilledButton(onPressed: onAccept, child: const Text('Voy en Camino'))), ]), ]), ), );
+    final bool isExpired = item.isExpired;
+
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.only(bottom: 16),
+      color: isExpired ? Colors.grey.shade200 : Theme.of(context).cardColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              isExpired ? 'Alerta Expirada' : 'Alerta SOS Recibida',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: isExpired ? Colors.grey.shade600 : null,
+                    decoration: isExpired ? TextDecoration.lineThrough : null,
+                  ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _InfoChip(icon: Icons.vpn_key_outlined, text: item.alertaId.substring(0, 6)),
+                const SizedBox(width: 8),
+                if (item.lat != null) const _InfoChip(icon: Icons.location_on_outlined, text: 'GPS Disponible'),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (isExpired)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Text(
+                    'Tiempo agotado. La alerta fue derivada a otro cuidador.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                ),
+              )
+            else
+              Row(children: [
+                Expanded(child: OutlinedButton(onPressed: onDerive, child: const Text('Derivar'))),
+                const SizedBox(width: 12),
+                Expanded(child: FilledButton(onPressed: onAccept, child: const Text('Voy en Camino'))),
+              ]),
+          ],
+        ),
+      ),
+    );
   }
 }
 

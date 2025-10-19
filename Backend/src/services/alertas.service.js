@@ -13,8 +13,6 @@ const pusher = new Pusher({
 
 const activeTimers = new Map();
 
-// ... (El resto de las funciones como haversineDistance, pickNearestNow, etc. no cambian) ...
-
 function clearCountdown(alertaId) {
   if (activeTimers.has(alertaId)) {
     clearTimeout(activeTimers.get(alertaId));
@@ -91,12 +89,24 @@ async function onCountdownExpired(alertaId) {
     await client.query('BEGIN');
     const { rows: [alerta] } = await client.query('SELECT * FROM alertas WHERE id=$1', [alertaId]);
     if (!alerta) { await client.query('ROLLBACK'); return; }
+
     const { rows: [lastAssigned] } = await client.query(`UPDATE alertas_asignaciones SET estado='EXPIRADA' WHERE alerta_id=$1 AND estado='PENDIENTE' RETURNING *`, [alertaId]);
+    
+    // ✅ MODIFICACIÓN: Notifica al cuidador anterior que su asignación ha expirado.
+    if (lastAssigned && lastAssigned.cuidador_id) {
+      console.log(`[PUSHER TRIGGER] Notificando expiración a cuidador anterior: ${lastAssigned.cuidador_id}`);
+      pusher.trigger(`private-user-${lastAssigned.cuidador_id}`, 'asignacion_expirada', { 
+        alertaId: alertaId 
+      });
+    }
+    
     const nextCuidador = await pickNearestNow(client, { alertaId: alerta.id, adultoId: alerta.usuario_id, lat: alerta.latitud, lon: alerta.longitud });
+    
     if (nextCuidador && nextCuidador.cuidador_id) {
       const nextOrden = (lastAssigned?.orden || 0) + 1;
       await client.query(`INSERT INTO alertas_asignaciones (alerta_id, cuidador_id, orden, estado) VALUES ($1,$2,$3,'PENDIENTE')`, [alerta.id, nextCuidador.cuidador_id, nextOrden]);
       await client.query('COMMIT');
+      
       pusher.trigger(`private-user-${nextCuidador.cuidador_id}`, 'alerta_nueva', { alertaId: alerta.id, orden: nextOrden, latitud: alerta.latitud, longitud: alerta.longitud });
       pusher.trigger(`private-alerta-${alerta.id}`, 'derivada_siguiente', { alertaId: alerta.id, nextOrden });
       startCountdown(alerta.id, alerta.countdown_seg);
