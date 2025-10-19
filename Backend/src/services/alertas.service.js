@@ -35,7 +35,6 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
   return R * c; // Distancia en km
 }
 
-// ✅ ================= INICIO DE LA LÓGICA CORREGIDA ================= ✅
 async function pickNearestNow(client, { alertaId, adultoId, lat, lon }) {
   // 1. Obtiene los cuidadores VINCULADOS que AÚN NO han sido notificados para ESTA alerta.
   const { rows: cuidadores } = await client.query(
@@ -82,7 +81,6 @@ async function pickNearestNow(client, { alertaId, adultoId, lat, lon }) {
   }
   return null;
 }
-// ✅ =================== FIN DE LA LÓGICA CORREGIDA =================== ✅
 
 async function notifyEmergencyToAdult(alertaId) {
   const { rows } = await pool.query(`SELECT usuario_id FROM alertas WHERE id=$1`, [alertaId]);
@@ -141,9 +139,11 @@ export async function crearAlertaRT({ adultoId, tipo, descripcion, countdownSeg,
     pusher.trigger(`private-user-${adultoId}`, 'alerta_creada', { alertaId: alerta.id, countdown: countdownSeg });
     
     if (nearest && nearest.cuidador_id) {
-      pusher.trigger(`private-user-${nearest.cuidador_id}`, 'alerta_nueva', {
+      console.log(`[PUSHER TRIGGER] Intentando enviar 'alerta_nueva' al canal: private-user-${nearest.cuidador_id}`);
+      await pusher.trigger(`private-user-${nearest.cuidador_id}`, 'alerta_nueva', {
         alertaId: alerta.id, orden: 1, latitud: alerta.latitud, longitud: alerta.longitud, precision_metros: alerta.precision_metros
       });
+      console.log(`[PUSHER TRIGGER] Evento enviado exitosamente.`);
       startCountdown(alerta.id, countdownSeg);
     } else {
       console.log(`[crearAlertaRT] No se encontró cuidador inicial. Notificando emergencia.`);
@@ -162,6 +162,7 @@ export async function crearAlertaRT({ adultoId, tipo, descripcion, countdownSeg,
 export async function aceptarAlerta({ alertaId, cuidadorId }) {
   clearCountdown(alertaId);
   await pool.query(`UPDATE alertas_asignaciones SET estado='ACEPTADA' WHERE alerta_id=$1 AND cuidador_id=$2`, [alertaId, cuidadorId]);
+  await pool.query(`UPDATE alertas SET estado='EN_CURSO' WHERE id=$1`, [alertaId]);
   pusher.trigger(`private-alerta-${alertaId}`, 'cuidador_en_camino', { alertaId, cuidadorId });
   return true;
 }
