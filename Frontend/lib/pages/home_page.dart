@@ -1,9 +1,11 @@
+// lib/pages/home_page.dart
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:pusher_channels_flutter/pusher_channels_flutter.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import '../auth_state.dart';
 import '../api.dart';
@@ -22,16 +24,81 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  // ===== Estados de la UI y Flujo =====
-  Timer? _sosTimer, _adultoTrailTimer, _hbTimer;
-  int _countdown = 0;
-  String? _alertaId;
-  String _estadoTexto = 'Listo para ayudar';
-  final List<_IncomingAlert> _incoming = [];
-  bool _isServicesInitialized = false;
-  bool _isRealTimeReady = false;
+  // ... (código existente) ...
 
-  // ===== Getters de conveniencia =====
+  Future<void> _initializeAuthenticatedServices(String token, String userId) async {
+    if (_isServicesInitialized) return;
+
+    print("✅ Usuario autenticado ($userId). Inicializando servicios...");
+    AlertasApi.configure(baseUrl: Api.baseUrl, token: token);
+
+    await _initNotifications();
+    
+    if (_esCuidador) {
+      await _fetchPendingAlerts();
+    }
+
+    await _sendLocationOnce(token);
+    _startHeartbeatUbicacion(token);
+
+    final success = await AlertasApi.initPusher(
+      apiKey: '67c27146be09c306d1f7',
+      cluster: 'us2',
+    );
+
+    if (mounted) {
+      if (success) {
+        print("✅ Conexión con Pusher exitosa. Suscribiendo a canales...");
+        _subscribeToUserChannel(userId);
+      } else {
+        print("❌ Falló la conexión con Pusher.");
+      }
+      setState(() {
+        _isServicesInitialized = true;
+        _isRealTimeReady = success;
+      });
+    }
+  }
+
+  Future<void> _initNotifications() async {
+    final messaging = FirebaseMessaging.instance;
+    await messaging.requestPermission();
+
+    try {
+      final fcmToken = await messaging.getToken();
+      if (fcmToken != null) {
+        print('📱 Firebase Messaging Token: $fcmToken');
+        await AlertasApi.registrarFcmToken(fcmToken);
+      }
+    } catch (e) {
+      print('🚨 Error al obtener o registrar el token FCM: $e');
+    }
+
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      // ✅ SINTAXIS CORREGIDA
+      print('🔔 Notificación recibida en primer plano!');
+      if (message.notification != null) {
+        print('Mensaje: ${message.notification!.body}');
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message.notification!.title ?? 'Nueva Notificación'),
+            backgroundColor: Theme.of(context).colorScheme.primary,
+          ),
+        );
+
+        if (_esCuidador) {
+          _fetchPendingAlerts();
+        }
+      }
+    });
+  }
+
+  // ... (el resto del archivo no necesita cambios)
+  // ...
+  // ... (el resto del archivo no necesita cambios)
+  // ...
+
   bool get _esAdultoMayor => context.read<AuthState>().user?['rol'] == 'ADULTO_MAYOR';
   bool get _esCuidador => context.read<AuthState>().user?['rol'] == 'CUIDADOR';
 
@@ -61,39 +128,13 @@ class _HomePageState extends State<HomePage> {
     AlertasApi.dispose();
     super.dispose();
   }
-
-  // ===== Lógica de Inicialización y Pusher =====
-  Future<void> _initializeAuthenticatedServices(String token, String userId) async {
-    if (_isServicesInitialized) return;
-
-    print("✅ Usuario autenticado ($userId). Inicializando servicios...");
-    AlertasApi.configure(baseUrl: Api.baseUrl, token: token);
-    
-    if (_esCuidador) {
-      await _fetchPendingAlerts();
-    }
-
-    await _sendLocationOnce(token);
-    _startHeartbeatUbicacion(token);
-
-    final success = await AlertasApi.initPusher(
-      apiKey: '67c27146be09c306d1f7',
-      cluster: 'us2',
-    );
-
-    if (mounted) {
-      if (success) {
-        print("✅ Conexión con Pusher exitosa. Suscribiendo a canales...");
-        _subscribeToUserChannel(userId);
-      } else {
-        print("❌ Falló la conexión con Pusher.");
-      }
-      setState(() {
-        _isServicesInitialized = true;
-        _isRealTimeReady = success;
-      });
-    }
-  }
+  Timer? _sosTimer, _adultoTrailTimer, _hbTimer;
+  int _countdown = 0;
+  String? _alertaId;
+  String _estadoTexto = 'Listo para ayudar';
+  final List<_IncomingAlert> _incoming = [];
+  bool _isServicesInitialized = false;
+  bool _isRealTimeReady = false;
 
   Future<void> _fetchPendingAlerts() async {
     try {
@@ -375,10 +416,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 }
-
-// ============================================================================
-// WIDGETS Y CLASES AUXILIARES
-// ============================================================================
 
 class _IncomingAlert {
   final String alertaId;

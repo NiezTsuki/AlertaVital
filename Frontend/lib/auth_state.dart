@@ -73,6 +73,10 @@ class AuthState extends ChangeNotifier {
     user = null;
     final sp = await SharedPreferences.getInstance();
     await sp.remove('token');
-    notifyListeners();
+    
+    // ✅ CORRECCIÓN: Llama a load() para reiniciar el estado de la app.
+    // Esto asegura que la app vuelva a un estado limpio de "cargando" y 
+    // luego se asiente correctamente en el estado "deslogueado".
+    await load(); 
   }
 }

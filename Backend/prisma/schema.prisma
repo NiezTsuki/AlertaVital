@@ -146,6 +146,7 @@ model usuarios {
   correo_verificado_en                        DateTime?              @db.Timestamptz(6)
   creado_en                                   DateTime               @default(now()) @db.Timestamptz(6)
   ultimo_login                                DateTime?              @db.Timestamptz(6)
+  fcm_token                                   String?                // Token para notificaciones push de Firebase
   alertas                                     alertas[]
   alertas_asignaciones                        alertas_asignaciones[]
   alertas_posiciones                          alertas_posiciones[]

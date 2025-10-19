@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "162915256207",
+    "project_id": "alertavital-5457e",
+    "storage_bucket": "alertavital-5457e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:162915256207:android:d7610a3e72c97a8d9eedfa",
+        "android_client_info": {
+          "package_name": "com.example.senior_locator_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCMUry0MNL-TKC3GBPCMpY5OuoKh4duqm8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

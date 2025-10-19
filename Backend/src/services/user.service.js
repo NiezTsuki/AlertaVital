@@ -37,3 +37,13 @@ export async function getUserById(id) {
 export async function setLastLogin(id) {
   await pool.query('UPDATE usuarios SET ultimo_login=NOW() WHERE id=$1', [id]);
 }
+
+// ✅ NUEVA FUNCIÓN AÑADIDA
+// Esta función recibe el ID de un usuario y un token de Firebase (FCM)
+// y lo guarda en la columna 'fcm_token' de la base de datos.
+export async function updateFcmToken(userId, fcmToken) {
+  await pool.query(
+    `UPDATE usuarios SET fcm_token = $1 WHERE id = $2`,
+    [fcmToken, userId]
+  );
+}

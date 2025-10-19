@@ -41,11 +41,24 @@ class AlertasApi {
 
   // ===== Endpoints de API REST =====
   
-  // ✅ NUEVO MÉTODO
-  // Llama a la nueva ruta del backend para obtener las alertas que no se vieron.
   static Future<List<dynamic>> getAlertasPendientes() async {
     final resp = await http.get(_uri('/api/alertas/pendientes'), headers: _headers());
     return _parse(resp) ?? [];
+  }
+
+  // ✅ NUEVO MÉTODO AÑADIDO
+  // Envía el token de notificaciones push al backend para guardarlo.
+  static Future<void> registrarFcmToken(String fcmToken) async {
+    try {
+      await http.post(
+        _uri('/api/usuarios/fcm-token'),
+        headers: _headers(),
+        body: jsonEncode({'fcm_token': fcmToken}),
+      );
+      print('Token FCM registrado en el backend exitosamente.');
+    } catch (e) {
+      print('Error en AlertasApi.registrarFcmToken: $e');
+    }
   }
 
   static Future<Map<String, dynamic>> crearSOS({double? lat, double? lon, double? precision}) async {
@@ -95,7 +108,6 @@ class AlertasApi {
   static final PusherChannelsFlutter _pusher = PusherChannelsFlutter.getInstance();
   static bool _isPusherInitialized = false;
 
-  // ✅ CORRECCIÓN: La función ahora devuelve un bool para indicar éxito o fracaso.
   static Future<bool> initPusher({required String apiKey, required String cluster}) async {
     if (_isPusherInitialized) return true;
     if (_token == null || _token!.isEmpty) return false;
@@ -114,11 +126,11 @@ class AlertasApi {
       await _pusher.connect();
       _isPusherInitialized = true;
       print('✅ [PUSHER] Conexión exitosa.');
-      return true; // Devuelve 'true' en caso de éxito
+      return true;
     } catch (e) {
       print('💥 [PUSHER] Excepción al inicializar: $e');
       _isPusherInitialized = false;
-      return false; // Devuelve 'false' si falla
+      return false;
     }
   }
 

@@ -1,7 +1,19 @@
-// src/services/alertas.service.js
 import Pusher from 'pusher';
+import admin from 'firebase-admin'; 
 import { pool } from '../db/pool.js';
 import { config } from '../config/env.js';
+
+
+if (!admin.apps.length && config.firebaseServiceAccountJson) {
+  try {
+    admin.initializeApp({
+      credential: admin.credential.cert(JSON.parse(config.firebaseServiceAccountJson)),
+    });
+    console.log('[FCM] Firebase Admin SDK inicializado correctamente.');
+  } catch (e) {
+    console.error('[FCM] Error al inicializar Firebase Admin SDK. Asegúrate de que la variable de entorno FIREBASE_SERVICE_ACCOUNT_JSON sea correcta.', e);
+  }
+}
 
 const pusher = new Pusher({
   appId: config.pusherAppId,
@@ -10,6 +22,35 @@ const pusher = new Pusher({
   cluster: config.pusherCluster,
   useTLS: true
 });
+
+// ✅ FUNCIÓN AUXILIAR PARA ENVIAR NOTIFICACIONES PUSH
+async function sendPushNotification(userId, title, body, data) {
+  if (!admin.apps.length) {
+    console.warn('[FCM] Firebase Admin no está inicializado. No se enviará la notificación.');
+    return;
+  }
+  try {
+    const { rows } = await pool.query('SELECT fcm_token FROM usuarios WHERE id = $1', [userId]);
+    const token = rows[0]?.fcm_token;
+
+    if (token) {
+      console.log(`[FCM] Enviando notificación a token del usuario ${userId}`);
+      await admin.messaging().send({
+        token: token,
+        notification: { title, body },
+        data: data,
+        android: { priority: 'high' },
+        apns: { payload: { aps: { 'content-available': 1, sound: 'default' } } }
+      });
+      console.log('[FCM] Notificación enviada exitosamente.');
+    } else {
+      console.log(`[FCM] Usuario ${userId} no tiene un token FCM registrado.`);
+    }
+  } catch (error) {
+    console.error(`[FCM] Error al enviar notificación a ${userId}:`, error);
+  }
+}
+
 
 const activeTimers = new Map();
 
@@ -92,9 +133,7 @@ async function onCountdownExpired(alertaId) {
 
     const { rows: [lastAssigned] } = await client.query(`UPDATE alertas_asignaciones SET estado='EXPIRADA' WHERE alerta_id=$1 AND estado='PENDIENTE' RETURNING *`, [alertaId]);
     
-    // ✅ MODIFICACIÓN: Notifica al cuidador anterior que su asignación ha expirado.
     if (lastAssigned && lastAssigned.cuidador_id) {
-      console.log(`[PUSHER TRIGGER] Notificando expiración a cuidador anterior: ${lastAssigned.cuidador_id}`);
       pusher.trigger(`private-user-${lastAssigned.cuidador_id}`, 'asignacion_expirada', { 
         alertaId: alertaId 
       });
@@ -108,6 +147,14 @@ async function onCountdownExpired(alertaId) {
       await client.query('COMMIT');
       
       pusher.trigger(`private-user-${nextCuidador.cuidador_id}`, 'alerta_nueva', { alertaId: alerta.id, orden: nextOrden, latitud: alerta.latitud, longitud: alerta.longitud });
+      
+      sendPushNotification(
+        nextCuidador.cuidador_id,
+        'Emergencia Asignada',
+        'Se requiere tu ayuda para una alerta de AlertaVital.',
+        { alertaId: alerta.id.toString(), click_action: 'FLUTTER_NOTIFICATION_CLICK' }
+      );
+
       pusher.trigger(`private-alerta-${alerta.id}`, 'derivada_siguiente', { alertaId: alerta.id, nextOrden });
       startCountdown(alerta.id, alerta.countdown_seg);
     } else {
@@ -133,16 +180,23 @@ export async function crearAlertaRT({ adultoId, tipo, descripcion, countdownSeg,
       await client.query(`INSERT INTO alertas_asignaciones (alerta_id, cuidador_id, orden, estado) VALUES ($1,$2,1,'PENDIENTE')`, [alerta.id, nearest.cuidador_id]);
     }
     await client.query('COMMIT');
+    
     pusher.trigger(`private-user-${adultoId}`, 'alerta_creada', { alertaId: alerta.id, countdown: countdownSeg });
+    
     if (nearest && nearest.cuidador_id) {
-      console.log(`[PUSHER TRIGGER] Intentando enviar 'alerta_nueva' al canal: private-user-${nearest.cuidador_id}`);
-      await pusher.trigger(`private-user-${nearest.cuidador_id}`, 'alerta_nueva', {
+      pusher.trigger(`private-user-${nearest.cuidador_id}`, 'alerta_nueva', {
         alertaId: alerta.id, orden: 1, latitud: alerta.latitud, longitud: alerta.longitud, precision_metros: alerta.precision_metros
       });
-      console.log(`[PUSHER TRIGGER] Evento enviado exitosamente.`);
+      
+      sendPushNotification(
+        nearest.cuidador_id,
+        '¡Nueva Alerta de Emergencia!',
+        'Un adulto mayor necesita tu ayuda urgentemente.',
+        { alertaId: alerta.id.toString(), click_action: 'FLUTTER_NOTIFICATION_CLICK' }
+      );
+
       startCountdown(alerta.id, countdownSeg);
     } else {
-      console.log(`[crearAlertaRT] No se encontró cuidador inicial. Notificando emergencia.`);
       await notifyEmergencyToAdult(alerta.id);
     }
     return { alertaId: alerta.id, countdown: countdownSeg };
