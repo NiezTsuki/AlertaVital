@@ -13,6 +13,8 @@ const pusher = new Pusher({
 
 const activeTimers = new Map();
 
+// ... (El resto de las funciones como haversineDistance, pickNearestNow, etc. no cambian) ...
+
 function clearCountdown(alertaId) {
   if (activeTimers.has(alertaId)) {
     clearTimeout(activeTimers.get(alertaId));
@@ -36,7 +38,6 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
 }
 
 async function pickNearestNow(client, { alertaId, adultoId, lat, lon }) {
-  // 1. Obtiene los cuidadores VINCULADOS que AÚN NO han sido notificados para ESTA alerta.
   const { rows: cuidadores } = await client.query(
     `SELECT c.cuidador_id FROM cuidadores c
      WHERE c.adulto_id = $1
@@ -49,10 +50,7 @@ async function pickNearestNow(client, { alertaId, adultoId, lat, lon }) {
     console.log(`[pickNearestNow] No se encontraron cuidadores vinculados y disponibles para el adulto ${adultoId} en la alerta ${alertaId}`);
     return null;
   }
-
   const cuidadorIds = cuidadores.map(c => c.cuidador_id);
-
-  // 2. De esos cuidadores, busca sus ubicaciones más recientes.
   const { rows: ubicaciones } = await client.query(
     `SELECT DISTINCT ON (usuario_id) usuario_id, latitud, longitud
      FROM ubicaciones
@@ -64,8 +62,6 @@ async function pickNearestNow(client, { alertaId, adultoId, lat, lon }) {
     console.log(`[pickNearestNow] Ninguno de los cuidadores disponibles (${cuidadorIds.join(', ')}) tiene una ubicación registrada.`);
     return null;
   }
-
-  // 3. Calcula la distancia para cada uno y devuelve el más cercano.
   const nearest = ubicaciones.reduce((closest, current) => {
     const distance = haversineDistance(lat, lon, current.latitud, current.longitud);
     if (distance < closest.distance) {
@@ -73,8 +69,6 @@ async function pickNearestNow(client, { alertaId, adultoId, lat, lon }) {
     }
     return closest;
   }, { distance: Infinity, cuidador_id: null });
-
-  // Si no se encontró a nadie con ubicación, devuelve null.
   if (nearest.cuidador_id) {
     console.log(`[pickNearestNow] Cuidador más cercano encontrado: ${nearest.cuidador_id} a ${nearest.distance.toFixed(2)} km.`);
     return nearest;
@@ -97,16 +91,12 @@ async function onCountdownExpired(alertaId) {
     await client.query('BEGIN');
     const { rows: [alerta] } = await client.query('SELECT * FROM alertas WHERE id=$1', [alertaId]);
     if (!alerta) { await client.query('ROLLBACK'); return; }
-
     const { rows: [lastAssigned] } = await client.query(`UPDATE alertas_asignaciones SET estado='EXPIRADA' WHERE alerta_id=$1 AND estado='PENDIENTE' RETURNING *`, [alertaId]);
-    
     const nextCuidador = await pickNearestNow(client, { alertaId: alerta.id, adultoId: alerta.usuario_id, lat: alerta.latitud, lon: alerta.longitud });
-    
     if (nextCuidador && nextCuidador.cuidador_id) {
       const nextOrden = (lastAssigned?.orden || 0) + 1;
       await client.query(`INSERT INTO alertas_asignaciones (alerta_id, cuidador_id, orden, estado) VALUES ($1,$2,$3,'PENDIENTE')`, [alerta.id, nextCuidador.cuidador_id, nextOrden]);
       await client.query('COMMIT');
-      
       pusher.trigger(`private-user-${nextCuidador.cuidador_id}`, 'alerta_nueva', { alertaId: alerta.id, orden: nextOrden, latitud: alerta.latitud, longitud: alerta.longitud });
       pusher.trigger(`private-alerta-${alerta.id}`, 'derivada_siguiente', { alertaId: alerta.id, nextOrden });
       startCountdown(alerta.id, alerta.countdown_seg);
@@ -126,18 +116,14 @@ export async function crearAlertaRT({ adultoId, tipo, descripcion, countdownSeg,
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const qAlerta = `INSERT INTO alertas (usuario_id, tipo, descripcion, countdown_seg, latitud, longitud, precision_metros) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`;
+    const qAlerta = `INSERT INTO alertas (usuario_id, tipo, descripcion, countdown_seg, latitud, longitud, precision_metros, creada_en) VALUES ($1,$2,$3,$4,$5,$6,$7, NOW()) RETURNING *`;
     const { rows: [alerta] } = await client.query(qAlerta, [adultoId, tipo, descripcion, countdownSeg, latitud, longitud, precision_metros]);
-    
     const nearest = await pickNearestNow(client, { alertaId: alerta.id, adultoId, lat: alerta.latitud, lon: alerta.longitud });
-    
     if (nearest && nearest.cuidador_id) {
       await client.query(`INSERT INTO alertas_asignaciones (alerta_id, cuidador_id, orden, estado) VALUES ($1,$2,1,'PENDIENTE')`, [alerta.id, nearest.cuidador_id]);
     }
     await client.query('COMMIT');
-    
     pusher.trigger(`private-user-${adultoId}`, 'alerta_creada', { alertaId: alerta.id, countdown: countdownSeg });
-    
     if (nearest && nearest.cuidador_id) {
       console.log(`[PUSHER TRIGGER] Intentando enviar 'alerta_nueva' al canal: private-user-${nearest.cuidador_id}`);
       await pusher.trigger(`private-user-${nearest.cuidador_id}`, 'alerta_nueva', {
@@ -182,8 +168,6 @@ export async function completarAlerta({ alertaId, cuidadorId }) {
   return true;
 }
 
-// ✅ NUEVA FUNCIÓN
-// Se encarga de buscar en la base de datos si hay alertas pendientes para un cuidador específico.
 export async function getAlertasPendientesDeCuidador(cuidadorId) {
   const q = `
     SELECT
@@ -195,7 +179,7 @@ export async function getAlertasPendientesDeCuidador(cuidadorId) {
     FROM alertas_asignaciones aa
     JOIN alertas a ON a.id = aa.alerta_id
     WHERE aa.cuidador_id = $1 AND aa.estado = 'PENDIENTE'
-    ORDER BY a.creado_en DESC
+    ORDER BY a.creada_en DESC
   `;
   const { rows } = await pool.query(q, [cuidadorId]);
   return rows;
