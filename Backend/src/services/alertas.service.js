@@ -27,33 +27,66 @@ const pusher = new Pusher({
   useTLS: true
 });
 
-// FUNCIÓN AUXILIAR PARA ENVIAR NOTIFICACIONES PUSH
 async function sendPushNotification(userId, title, body, data) {
   if (!admin.apps.length) {
     console.warn('[FCM] Firebase Admin no está inicializado. No se enviará la notificación.');
     return;
   }
-  try {
-    const { rows } = await pool.query('SELECT fcm_token FROM usuarios WHERE id = $1', [userId]);
-    const token = rows[0]?.fcm_token;
 
-    if (token) {
-      console.log(`[FCM] Enviando notificación a token del usuario ${userId}`);
-      await admin.messaging().send({
-        token: token,
-        notification: { title, body },
-        data: data,
-        android: { priority: 'high' },
-        apns: { payload: { aps: { 'content-available': 1, sound: 'default' } } }
-      });
-      console.log('[FCM] Notificación enviada exitosamente.');
-    } else {
-      console.log(`[FCM] Usuario ${userId} no tiene un token FCM registrado.`);
+  try {
+    // 1) Consultar token con manejo de errores y guardando el tiempo
+    const start = Date.now();
+    const res = await pool.query({
+      text: 'SELECT fcm_token FROM usuarios WHERE id = $1',
+      values: [userId],
+      // Opcional: statement_timeout si soporta tu cliente / configuración
+    });
+    const duration = Date.now() - start;
+    console.log(`[FCM] Consulta token para ${userId} en ${duration}ms, filas=${res.rowCount}`);
+
+    const token = res.rows[0]?.fcm_token;
+    if (!token) {
+      console.log(`[FCM] Usuario ${userId} no tiene token FCM.`);
+      return;
+    }
+
+    // 2) Intentar enviar a FCM con reintentos simples (por si es error de red temporal)
+    const maxAttempts = 3;
+    let attempt = 0;
+    while (attempt < maxAttempts) {
+      try {
+        attempt++;
+        console.log(`[FCM] Enviando notificación (intento ${attempt}) a usuario ${userId}`);
+        await admin.messaging().send({
+          token,
+          notification: { title, body },
+          data,
+          android: { priority: 'high' },
+          apns: { payload: { aps: { 'content-available': 1, sound: 'default' } } }
+        });
+        console.log('[FCM] Notificación enviada exitosamente.');
+        break; // éxito -> salir del loop
+      } catch (fcmErr) {
+        console.error(`[FCM] Error envío intento ${attempt} a ${userId}:`, fcmErr.code ?? fcmErr.message ?? fcmErr);
+        // si no quedan intentos, re-lanzar o manejar
+        if (attempt >= maxAttempts) {
+          console.error('[FCM] Fallaron todos los intentos de envío.');
+        } else {
+          // espera exponencial simple antes del siguiente intento
+          await new Promise(r => setTimeout(r, 200 * attempt));
+        }
+      }
     }
   } catch (error) {
-    console.error(`[FCM] Error al enviar notificación a ${userId}:`, error);
+    // Diferenciar errores de PG y otros
+    if (error.code) {
+      console.error(`[FCM] Error en DB al buscar token para ${userId}:`, error.code, error.message);
+    } else {
+      console.error(`[FCM] Error inesperado al enviar a ${userId}:`, error);
+    }
   }
 }
+
 
 
 const activeTimers = new Map();
