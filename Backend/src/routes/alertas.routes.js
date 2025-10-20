@@ -37,7 +37,7 @@ router.post('/alertas/sos', auth, async (req, res) => {
     const {
       tipo = 'SOS',
       descripcion = null,
-      countdown = 30,
+      countdown = 90,
       latitud = null,
       longitud = null,
       precision_metros = null,

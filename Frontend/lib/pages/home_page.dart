@@ -139,6 +139,31 @@ class _HomePageState extends State<HomePage> {
     // Listener para notificaciones en primer plano
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       print('🔔 Notificación recibida en primer plano!');
+
+      // --- INICIO DEL NUEVO CÓDIGO ---
+      // Revisa mensajes de DATOS (silenciosos)
+      // Esto es para que el Adulto Mayor vea la respuesta del cuidador.
+      if (message.data.isNotEmpty && _esAdultoMayor) {
+        final tipo = message.data['tipo'] as String?;
+
+        if (tipo == 'ALERTA_ACEPTADA') {
+          final textoMensaje = message.data['mensaje'] as String?;
+          print('✅ Alerta aceptada por cuidador. Actualizando UI...');
+          
+          setState(() {
+            // 1. Actualiza el texto que ve el adulto
+            _estadoTexto = textoMensaje ?? '¡Un cuidador va en camino!';
+            
+            // 2. Detiene el contador de "Derivación en: ..."
+            _stopCountdown(); 
+          });
+        }
+      }
+      // --- FIN DEL NUEVO CÓDIGO ---
+
+      // Lógica existente para notificaciones VISIBLES
+      // (Esto es principalmente para el Cuidador)
+
       if (message.notification != null) {
         print('Mensaje: ${message.notification!.body}');
         
