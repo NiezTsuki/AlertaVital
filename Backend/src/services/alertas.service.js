@@ -205,8 +205,9 @@ async function onCountdownExpired(alertaId) {
     client.release(); 
   }
 }
-
-export async function crearAlertaRT({ adultoId, tipo, descripcion, countdownSeg, latitud, longitud, precision_metros }) {
+export async function crearAlertaRT({ adultoId, tipo, descripcion, latitud, longitud, precision_metros }) {
+  // ✅ COUNTDOWN AJUSTADO A 90 SEGUNDOS
+  const countdownSeg = 90;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -246,53 +247,38 @@ export async function crearAlertaRT({ adultoId, tipo, descripcion, countdownSeg,
   }
 }
 
+// ✅ FUNCIÓN CORREGIDA
 export async function aceptarAlerta({ alertaId, cuidadorId }) {
-  clearCountdown(alertaId); // Esto ya lo tenías, y está perfecto.
-
-  const client = await pool.connect(); // --- NUEVO: Usar un 'client' para transacciones
-
+  clearCountdown(alertaId);
+  
+  const client = await pool.connect();
   try {
-    await client.query('BEGIN'); // --- NUEVO ---
+    await client.query('BEGIN');
 
-    // 1. Actualizar la asignación (como antes)
-    await client.query(`UPDATE alertas_asignaciones SET estado='EN_CAMINO' WHERE alerta_id=$1 AND cuidador_id=$2`, [alertaId, cuidadorId]);
-
-    // 2. Actualizar la alerta y OBTENER el ID del adulto (usuario_id)
-    // --- MODIFICADO ---
-    const resAlerta = await client.query(
-      `UPDATE alertas SET estado='EN_CURSO' WHERE id=$1 RETURNING usuario_id`, 
-      [alertaId]
+    // Actualiza la asignación al estado correcto ('EN_CAMINO')
+    await client.query(
+      `UPDATE alertas_asignaciones SET estado='EN_CAMINO', respondida_en=NOW() WHERE alerta_id=$1 AND cuidador_id=$2`,
+      [alertaId, cuidadorId]
     );
-    const adultoId = resAlerta.rows[0]?.usuario_id; // --- NUEVO: ID del adulto mayor
-
-    // 3. Obtener el nombre del cuidador para el mensaje
-    // --- NUEVO ---
-    const resCuidador = await client.query(
-      `SELECT nombre_completo FROM usuarios WHERE id = $1`,
-      [cuidadorId]
-    );
+    
+    // Obtiene el ID del adulto y el nombre del cuidador para las notificaciones
+    const resAlerta = await client.query(`SELECT usuario_id FROM alertas WHERE id = $1`, [alertaId]);
+    const adultoId = resAlerta.rows[0]?.usuario_id;
+    const resCuidador = await client.query(`SELECT nombre_completo FROM usuarios WHERE id = $1`, [cuidadorId]);
     const cuidadorNombre = resCuidador.rows[0]?.nombre_completo || 'Un cuidador';
 
-    // 4. Confirmar la transacción
-    await client.query('COMMIT'); // --- NUEVO ---
+    await client.query('COMMIT');
 
-    // 5. Disparar Pusher (como antes)
+    // Notifica a través de Pusher
     pusher.trigger(`private-alerta-${alertaId}`, 'cuidador_en_camino', { alertaId, cuidadorId, cuidadorNombre });
 
-    // 6. ¡ENVIAR NOTIFICACIÓN FCM DE VUELTA AL ADULTO!
-    // --- NUEVO ---
+    // Envía notificación push silenciosa de vuelta al adulto mayor
     if (adultoId) {
-      console.log(`[aceptarAlerta] Notificando a adulto ${adultoId} que ${cuidadorNombre} aceptó`);
-
-      // Usamos tu función 'sendPushNotification'
-      // Le pasamos null a title y body para que sea una "notificación de datos" (silenciosa)
-      // y no moleste al adulto, solo actualice la app.
       await sendPushNotification(
         adultoId,
-        null, // Sin título de notificación
-        null, // Sin cuerpo de notificación
+        null, // Sin título
+        null, // Sin cuerpo
         {
-          // Este es el payload que tu app de Flutter debe escuchar
           tipo: 'ALERTA_ACEPTADA',
           mensaje: `${cuidadorNombre} va en camino.`,
           alertaId: alertaId.toString(),
@@ -300,17 +286,16 @@ export async function aceptarAlerta({ alertaId, cuidadorId }) {
         }
       );
     }
-
     return true;
-
   } catch (e) {
-    await client.query('ROLLBACK'); // --- NUEVO: Revertir en caso de error
+    await client.query('ROLLBACK');
     console.error(`[aceptarAlerta] Error en transacción: ${e.message}`);
-    throw e; // Lanzar el error para que la ruta lo atrape
+    throw e;
   } finally {
-    client.release(); // --- NUEVO: Liberar el cliente
+    client.release();
   }
 }
+
 
 export async function derivarAlerta({ alertaId, cuidadorId }) {
   const { rows } = await pool.query(`SELECT * FROM alertas_asignaciones WHERE alerta_id=$1 AND cuidador_id=$2 AND estado='PENDIENTE'`, [alertaId, cuidadorId]);
