@@ -255,7 +255,7 @@ export async function aceptarAlerta({ alertaId, cuidadorId }) {
     await client.query('BEGIN'); // --- NUEVO ---
 
     // 1. Actualizar la asignación (como antes)
-    await client.query(`UPDATE alertas_asignaciones SET estado='ACEPTADA' WHERE alerta_id=$1 AND cuidador_id=$2`, [alertaId, cuidadorId]);
+    await client.query(`UPDATE alertas_asignaciones SET estado='EN_CAMINO' WHERE alerta_id=$1 AND cuidador_id=$2`, [alertaId, cuidadorId]);
 
     // 2. Actualizar la alerta y OBTENER el ID del adulto (usuario_id)
     // --- MODIFICADO ---
