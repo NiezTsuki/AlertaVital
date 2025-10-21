@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../auth_state.dart';
 import '../widgets/brand_header.dart';
 import '../widgets/soft_background.dart';
+import 'login_page.dart'; 
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -46,9 +47,10 @@ class _RegisterPageState extends State<RegisterPage> {
 
   String? _validatePassword(String? v) {
     if (v == null || v.isEmpty) return 'Contraseña requerida';
-    if (v.length < 8) return 'Mínimo 8 caracteres';
-    if (!RegExp(r'[A-Z]').hasMatch(v)) return 'Incluye 1 mayúscula';
-    if (!RegExp(r'[0-9]').hasMatch(v)) return 'Incluye 1 número';
+    if (v.length < 6) return 'Mínimo 6 caracteres'; // Ajustado a 6 como en el backend
+    // Puedes volver a añadir las otras validaciones si las implementas en el backend
+    // if (!RegExp(r'[A-Z]').hasMatch(v)) return 'Incluye 1 mayúscula';
+    // if (!RegExp(r'[0-9]').hasMatch(v)) return 'Incluye 1 número';
     return null;
   }
 
@@ -60,7 +62,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
   String? _validatePhone(String? v) {
     if (v == null || v.trim().isEmpty) return 'Teléfono requerido';
-    final clean = toNumericString(v); // solo dígitos
+    final clean = toNumericString(v);
     if (!(clean.startsWith('569') && clean.length == 11)) {
       return 'Formato válido: +56 9 #### ####';
     }
@@ -74,6 +76,7 @@ class _RegisterPageState extends State<RegisterPage> {
     return '+$d';
   }
 
+  // ✅ FUNCIÓN _submit COMPLETAMENTE ACTUALIZADA
   Future<void> _submit() async {
     FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) return;
@@ -88,16 +91,40 @@ class _RegisterPageState extends State<RegisterPage> {
       _normalizePhone(_phoneCtrl.text.trim()),
       _passCtrl.text,
     );
-
-    setState(() => _isSubmitting = false);
+    
+    // El 'isSubmitting' se desactiva dentro de los if/else para un mejor control.
 
     if (ok && mounted) {
-      Navigator.pushReplacementNamed(context, '/home');
+      // Si el registro es exitoso, muestra el diálogo de "Revisa tu correo".
+      setState(() => _isSubmitting = false);
+      showDialog(
+        context: context,
+        barrierDismissible: false, // El usuario debe presionar el botón
+        builder: (context) => AlertDialog(
+          title: const Text('¡Registro Exitoso!'),
+          content: const Text('Hemos enviado un enlace de verificación a tu correo electrónico. Por favor, revísalo para activar tu cuenta antes de iniciar sesión.'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                // Navega a la página de login y limpia el historial de navegación.
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const LoginPage()), 
+                  (route) => false
+                );
+              },
+              child: const Text('Entendido'),
+            ),
+          ],
+        ),
+      );
     } else {
+      // Si el registro falla, muestra el SnackBar de error.
+      setState(() => _isSubmitting = false);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Registro falló. Revisa los datos.'),
+          content: Text('El registro falló. El correo puede que ya esté en uso.'),
+          backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -196,7 +223,7 @@ class _RegisterPageState extends State<RegisterPage> {
                               decoration: _inputDeco(
                                 'Contraseña',
                                 icon: Icons.lock_outline,
-                                helper: 'Mín. 8, 1 mayúscula y 1 número',
+                                // helper: 'Mín. 8, 1 mayúscula y 1 número', // Desactivado temporalmente
                                 suffix: IconButton(
                                   tooltip: _obscure1 ? 'Mostrar' : 'Ocultar',
                                   icon: Icon(_obscure1 ? Icons.visibility : Icons.visibility_off),
@@ -229,7 +256,7 @@ class _RegisterPageState extends State<RegisterPage> {
                               child: FilledButton(
                                 onPressed: _isSubmitting ? null : _submit,
                                 child: _isSubmitting
-                                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 3))
+                                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white))
                                     : const Text('Registrar'),
                               ),
                             ),

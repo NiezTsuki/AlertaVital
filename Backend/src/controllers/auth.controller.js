@@ -43,7 +43,7 @@ export async function register(req, res) {
     const verificationUrl = `${config.frontendUrl}/verify-email?token=${verificationToken}`;
 
     await resend.emails.send({
-      from: 'AlertaVital <onboarding@resend.dev>',
+      from: 'AlertaVital <danieljofremolina@gmail.com>',
       to: [user.correo],
       subject: 'Verifica tu correo electrónico en AlertaVital',
       html: `
