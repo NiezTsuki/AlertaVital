@@ -17,4 +17,10 @@ export const config = {
 
   //servicios firebase
   firebaseServiceAccountJson: process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
+
+  // URL de tu aplicación frontend (para los correos)
+  frontendUrl: process.env.FRONTEND_URL,
+
+  // API Key para el envío de correos
+  resendApiKey: process.env.RESEND_API_KEY
 };

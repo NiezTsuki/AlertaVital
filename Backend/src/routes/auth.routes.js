@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, login, me } from '../controllers/auth.controller.js';
+import { register, login, me, verifyEmail } from '../controllers/auth.controller.js';
 import { auth } from '../middleware/auth.js';
 import Pusher from 'pusher';
 import { config } from '../config/env.js';
@@ -18,6 +18,7 @@ const router = Router();
 router.post('/register', register);
 router.post('/login', login);
 router.get('/me', auth, me);
+router.post('/verify-email', verifyEmail);
 
 
 // --- Ruta de Autorización para Pusher ---
