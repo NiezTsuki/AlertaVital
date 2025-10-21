@@ -18,7 +18,7 @@ export async function vincularCuidador({ adultoId, cuidadorId }) {
   return await prisma.cuidadores.upsert({
     where: {
       // Usamos el nombre de la restricción única definida en tu schema.prisma
-      adulto_id_cuidador_id_unique: {
+      adulto_id_cuidador_id: {
         adulto_id: adultoId,
         cuidador_id: cuidadorId,
       },
@@ -36,7 +36,7 @@ export async function desvincularCuidador({ adultoId, cuidadorId }) {
     // Prisma.delete intenta eliminar el registro basado en la clave única.
     await prisma.cuidadores.delete({
       where: {
-        adulto_id_cuidador_id_unique: {
+        adulto_id_cuidador_id: {
           adulto_id: adultoId,
           cuidador_id: cuidadorId,
         },
