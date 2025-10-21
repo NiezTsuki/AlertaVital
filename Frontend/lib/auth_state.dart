@@ -67,7 +67,7 @@ class AuthState extends ChangeNotifier {
     return false;
   }
 
-  // ✅ FUNCIÓN DE REGISTRO COMPLETA Y CON DEPURACIÓN
+  //UNCIÓN DE REGISTRO COMPLETA Y CON DEPURACIÓN
   Future<bool> register(String rol, String nombre, String correo, String telefono, String contrasena) async {
     print("📲 [REGISTER_FRONTEND] Intentando registrar usuario...");
     isLoading = true;
@@ -79,7 +79,7 @@ class AuthState extends ChangeNotifier {
       print("📬 [REGISTER_FRONTEND] Respuesta recibida del servidor. Status: ${res['status']}");
 
       if (res['status'] == 201) { // 201 Created = Éxito
-        print("✅ [REGISTER_FRONTEND] Registro exitoso. Procediendo a login automático...");
+        print("[REGISTER_FRONTEND] Registro exitoso. Procediendo a login automático...");
         // Si el registro es exitoso, hacemos login automáticamente para obtener el token y los datos del usuario.
         return await login(correo, contrasena);
       } else {

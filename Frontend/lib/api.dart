@@ -43,6 +43,26 @@ class Api {
     return {'status': res.statusCode, 'body': jsonDecode(res.body)};
   }
 
+  // NUEVA FUNCIÓN AÑADIDA
+  /// Envía el token de verificación del correo al backend.
+  static Future<Map<String, dynamic>> verifyEmail(String verificationToken) async {
+    final uri = Uri.parse('$baseUrl/api/verify-email');
+    final res = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'token': verificationToken}),
+    );
+    
+    final body = jsonDecode(res.body);
+    if (res.statusCode == 200) {
+      return body; // Devuelve el mensaje de éxito del servidor, ej: {'message': '...'}
+    } else {
+      // Si el servidor responde con un error, lo lanzamos como una excepción.
+      throw Exception(body['error'] ?? 'Error al verificar el correo (${res.statusCode})');
+    }
+  }
+
+
   /// ---------- VÍNCULOS (ADULTO MAYOR ↔ CUIDADOR) ----------
 
   static Map<String, String> _headers(String token) => {

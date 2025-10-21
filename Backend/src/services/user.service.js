@@ -71,3 +71,10 @@ export async function updateFcmToken(userId, fcmToken) {
     data: { fcm_token: fcmToken },
   });
 }
+
+export async function setCorreoVerificado(userId) {
+  await prisma.usuarios.update({
+    where: { id: userId },
+    data: { correo_verificado_en: new Date() },
+  });
+}
