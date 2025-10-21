@@ -45,17 +45,48 @@ const verificationUrl = `${config.frontendUrl}?token=${verificationToken}`;
     await resend.emails.send({
       from: 'AlertaVital <noreply@alertavital.xyz>',
       to: [user.correo],
-      subject: 'Verifica tu correo electrónico en AlertaVital',
+      subject: 'Verifica tu cuenta en AlertaVital',
       html: `
-        <div style="font-family: Arial, sans-serif; text-align: center; padding: 20px; color: #333;">
-          <h2>¡Bienvenido a AlertaVital!</h2>
-          <p>Gracias por registrarte. Por favor, haz clic en el siguiente botón para verificar tu cuenta:</p>
-          <a href="${verificationUrl}" style="background-color: #007bff; color: white; padding: 15px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0;">
-            Verificar mi Correo
-          </a>
-          <p style="font-size: 12px; color: #777;">Si el botón no funciona, copia y pega el siguiente enlace en tu navegador:</p>
-          <p style="font-size: 12px; color: #777;">${verificationUrl}</p>
-        </div>
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { margin: 0; padding: 0; background-color: #f4f7f6; }
+            .container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+            .header { background-color: #6A5ACD; /* Un morado similar al logo */ padding: 40px; text-align: center; }
+            .header img { max-width: 150px; }
+            .content { padding: 40px; color: #333333; line-height: 1.6; }
+            .content h1 { color: #333333; font-size: 24px; margin-bottom: 15px; }
+            .content p { margin-bottom: 25px; font-size: 16px; }
+            .button { display: inline-block; background-color: #FF6347; /* Un rojo/coral similar al logo */ color: #ffffff; padding: 15px 30px; font-size: 16px; font-weight: bold; text-decoration: none; border-radius: 5px; }
+            .footer { padding: 20px; text-align: center; font-size: 12px; color: #777777; background-color: #f4f7f6; }
+            .link { word-break: break-all; color: #007bff; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <img src="https://assets.vercel.com/image/upload/v1700683050/alerta_vital.png" alt="Logo de AlertaVital">
+            </div>
+            <div class="content">
+              <h1>¡Un último paso para activar tu cuenta!</h1>
+              <p>Hola, ${user.nombre_completo},</p>
+              <p>Gracias por registrarte en AlertaVital. Para completar la configuración y asegurar tu cuenta, por favor, verifica tu dirección de correo electrónico haciendo clic en el botón de abajo.</p>
+              <p style="text-align: center;">
+                <a href="${verificationUrl}" class="button">Verificar mi Correo</a>
+              </p>
+              <p>Este enlace de verificación es válido por 1 hora.</p>
+            </div>
+            <div class="footer">
+              <p>Si el botón no funciona, copia y pega el siguiente enlace en tu navegador:</p>
+              <p><a href="${verificationUrl}" class="link">${verificationUrl}</a></p>
+              <p style="margin-top: 20px;">Si no creaste esta cuenta, puedes ignorar este correo de forma segura.</p>
+            </div>
+          </div>
+        </body>
+        </html>
       `,
     });
 
