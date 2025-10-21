@@ -4,13 +4,12 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("alertavital_DATABASE_URL")
+  url       = env("alertavital_PRISMA_DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model alertas {
-  id                   String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                   String                 @id @default(uuid()) @db.Uuid // ✅ Corrected
   usuario_id           String                 @db.Uuid
   tipo                 String
   descripcion          String?
@@ -21,20 +20,20 @@ model alertas {
   latitud              Float?
   longitud             Float?
   precision_metros     Float?
-  usuarios             usuarios               @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "alertas_usuario_id_foreign")
+  usuarios             usuarios               @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   alertas_asignaciones alertas_asignaciones[]
   alertas_eventos      alertas_eventos[]
   alertas_posiciones   alertas_posiciones[]
 
-  @@index([creada_en], map: "alertas_creada_idx")
+  @@index([creada_en])
   @@index([estado])
-  @@index([latitud, longitud], map: "alertas_lat_lon_idx")
+  @@index([latitud, longitud])
   @@index([tipo])
-  @@index([usuario_id], map: "alertas_usuario_idx")
+  @@index([usuario_id])
 }
 
 model alertas_asignaciones {
-  id            String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id            String            @id @default(uuid()) @db.Uuid // ✅ Corrected
   alerta_id     String            @db.Uuid
   cuidador_id   String            @db.Uuid
   orden         Int               @default(1)
@@ -46,30 +45,30 @@ model alertas_asignaciones {
   ml_model      String?
   ml_version    String?
   eta_seg       Int?
-  alertas       alertas           @relation(fields: [alerta_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "alertas_asignaciones_alerta_id_foreign")
-  usuarios      usuarios          @relation(fields: [cuidador_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "alertas_asignaciones_cuidador_id_foreign")
+  alertas       alertas           @relation(fields: [alerta_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  usuarios      usuarios          @relation(fields: [cuidador_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@unique([alerta_id, cuidador_id, orden], map: "uniq_alerta_cuidador_orden")
-  @@index([alerta_id, orden], map: "asig_alerta_orden_idx")
-  @@index([cuidador_id], map: "asig_cuidador_idx")
-  @@index([estado], map: "asig_estado_idx")
+  @@unique([alerta_id, cuidador_id, orden])
+  @@unique([alerta_id, estado])
+  @@index([alerta_id, orden])
+  @@index([cuidador_id])
+  @@index([estado])
 }
 
 model alertas_eventos {
-  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id        String   @id @default(uuid()) @db.Uuid // ✅ Corrected
   alerta_id String   @db.Uuid
   evento    String
   metadata  Json?
   creado_en DateTime @default(now()) @db.Timestamptz(6)
-  alertas   alertas  @relation(fields: [alerta_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "alertas_eventos_alerta_id_foreign")
+  alertas   alertas  @relation(fields: [alerta_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@index([alerta_id, creado_en], map: "eventos_alerta_creado_idx")
-  @@index([evento], map: "eventos_evento_idx")
+  @@index([alerta_id, creado_en])
+  @@index([evento])
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model alertas_posiciones {
-  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id               String   @id @default(uuid()) @db.Uuid // ✅ Corrected
   alerta_id        String   @db.Uuid
   usuario_id       String   @db.Uuid
   rol              String
@@ -77,75 +76,63 @@ model alertas_posiciones {
   longitud         Float
   precision_metros Float?
   capturada_en     DateTime @default(now()) @db.Timestamptz(6)
-  alertas          alertas  @relation(fields: [alerta_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "alertas_posiciones_alerta_id_foreign")
-  usuarios         usuarios @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "alertas_posiciones_usuario_id_foreign")
+  alertas          alertas  @relation(fields: [alerta_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  usuarios         usuarios @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@index([alerta_id, capturada_en], map: "pos_alerta_time_idx")
-  @@index([rol], map: "pos_rol_idx")
-  @@index([usuario_id, capturada_en], map: "pos_user_time_idx")
+  @@index([alerta_id, capturada_en])
+  @@index([rol])
+  @@index([usuario_id, capturada_en])
 }
 
 model cuidadores {
-  id                                        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                        String   @id @default(uuid()) @db.Uuid // ✅ Corrected
   adulto_id                                 String   @db.Uuid
   cuidador_id                               String   @db.Uuid
   creado_en                                 DateTime @default(now()) @db.Timestamptz(6)
-  usuarios_cuidadores_adulto_idTousuarios   usuarios @relation("cuidadores_adulto_idTousuarios", fields: [adulto_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "cuidadores_adulto_id_foreign")
-  usuarios_cuidadores_cuidador_idTousuarios usuarios @relation("cuidadores_cuidador_idTousuarios", fields: [cuidador_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "cuidadores_cuidador_id_foreign")
+  usuarios_cuidadores_adulto_idTousuarios   usuarios @relation("cuidadores_adulto_idTousuarios", fields: [adulto_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  usuarios_cuidadores_cuidador_idTousuarios usuarios @relation("cuidadores_cuidador_idTousuarios", fields: [cuidador_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@unique([adulto_id, cuidador_id], map: "cuidadores_adulto_id_cuidador_id_unique")
-  @@index([adulto_id], map: "cuidadores_adulto_id_index")
-  @@index([cuidador_id], map: "cuidadores_cuidador_id_index")
+  @@unique([adulto_id, cuidador_id])
+  @@index([adulto_id])
+  @@index([cuidador_id])
 }
 
 model historial_medico {
-  id             String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id             String   @id @default(uuid()) @db.Uuid // ✅ Corrected
   usuario_id     String   @db.Uuid
   condicion      String
   descripcion    String?
   medicamentos   String?
   alergias       String?
   fecha_registro DateTime @default(now()) @db.Date
-  usuarios       usuarios @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "historial_medico_usuario_id_foreign")
+  usuarios       usuarios @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@index([usuario_id, fecha_registro], map: "hist_med_usuario_fecha_idx")
-}
-
-model knex_migrations {
-  id             Int       @id @default(autoincrement())
-  name           String?   @db.VarChar(255)
-  batch          Int?
-  migration_time DateTime? @db.Timestamptz(6)
-}
-
-model knex_migrations_lock {
-  index     Int  @id @default(autoincrement())
-  is_locked Int?
+  @@index([usuario_id, fecha_registro])
 }
 
 model ubicaciones {
-  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id               String   @id @default(uuid()) @db.Uuid // ✅ Corrected
   usuario_id       String   @db.Uuid
   latitud          Float
   longitud         Float
   precision_metros Float?
   detectado_en     DateTime @default(now()) @db.Timestamptz(6)
-  usuarios         usuarios @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "ubicaciones_usuario_id_foreign")
+  usuarios         usuarios @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@index([usuario_id, detectado_en], map: "ubicaciones_usuario_id_detectado_en_index")
+  @@index([usuario_id, detectado_en])
 }
 
 model usuarios {
-  id                                          String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                          String                 @id @default(uuid()) @db.Uuid // ✅ Corrected
   rol                                         user_role
   nombre_completo                             String
-  correo                                      String?                @unique(map: "usuarios_correo_unique") @db.Citext
+  correo                                      String?                @unique @db.Citext
   telefono                                    String?
   contrasena_hash                             String
   correo_verificado_en                        DateTime?              @db.Timestamptz(6)
   creado_en                                   DateTime               @default(now()) @db.Timestamptz(6)
   ultimo_login                                DateTime?              @db.Timestamptz(6)
-  fcm_token                                   String?                // Token para notificaciones push de Firebase
+  fcm_token                                   String?
   alertas                                     alertas[]
   alertas_asignaciones                        alertas_asignaciones[]
   alertas_posiciones                          alertas_posiciones[]
@@ -156,19 +143,22 @@ model usuarios {
   zonas_seguras                               zonas_seguras[]
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model zonas_seguras {
-  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id           String   @id @default(uuid()) @db.Uuid // ✅ Corrected
   usuario_id   String   @db.Uuid
   nombre       String
   latitud      Float
   longitud     Float
   radio_metros Float
   creado_en    DateTime @default(now()) @db.Timestamptz(6)
-  usuarios     usuarios @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "zonas_seguras_usuario_id_foreign")
+  usuarios     usuarios @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@index([usuario_id], map: "zonas_seguras_usuario_id_index")
+  @@index([usuario_id])
 }
+
+// Estos modelos son de Knex y ya no son necesarios si solo usas Prisma
+// model knex_migrations { ... }
+// model knex_migrations_lock { ... }
 
 enum asignacion_estado {
   PENDIENTE
