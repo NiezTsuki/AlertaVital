@@ -105,6 +105,8 @@ class _HomePageState extends State<HomePage> {
       if (pending.isNotEmpty && mounted) {
         final newAlerts = pending.map((data) => _IncomingAlert.fromJson(data as Map<String, dynamic>)).toList();
         setState(() { _incoming.clear(); _incoming.addAll(newAlerts); });
+      } else if (mounted) {
+        setState(() { _incoming.clear(); });
       }
     } catch (e) { print("🚨 Error al buscar alertas pendientes: $e"); }
   }
@@ -132,7 +134,6 @@ class _HomePageState extends State<HomePage> {
       final id = r['alertaId']?.toString();
       if (id == null) throw Exception('No se pudo crear la alerta');
       
-      // ✅ CORRECCIÓN 1: El listener ahora escucha todos los eventos de la alerta.
       final alertaChannel = await AlertasApi.subscribeToChannel('private-alerta-$id');
       alertaChannel.onEvent = (event) {
         if (!mounted) return;
@@ -159,10 +160,11 @@ class _HomePageState extends State<HomePage> {
     try {
       final data = jsonDecode(event.data!);
       final alertaId = data['alertaId'] as String?;
-      if (alertaId == null) return;
-      final index = _incoming.indexWhere((a) => a.alertaId == alertaId);
-      if (index != -1 && mounted) {
-        setState(() => _incoming[index].isExpired = true);
+      if (alertaId != null) {
+        final index = _incoming.indexWhere((a) => a.alertaId == alertaId);
+        if (index != -1 && mounted) {
+          setState(() => _incoming[index].isExpired = true);
+        }
       }
     } catch (e) { print('Error procesando asignacion_expirada: $e'); }
   }
@@ -172,24 +174,17 @@ class _HomePageState extends State<HomePage> {
       if (event.data == null) return;
       final data = jsonDecode(event.data!);
       final alertaId = data['alertaId']?.toString();
-      if (alertaId == null) return;
-      if (!_incoming.any((a) => a.alertaId == alertaId) && mounted) {
+      if (alertaId != null && !_incoming.any((a) => a.alertaId == alertaId) && mounted) {
         setState(() => _incoming.insert(0, _IncomingAlert.fromJson(data)));
       }
     } catch (e) { print('💥 ERROR procesando alerta_nueva: $e'); }
   }
 
-  // ✅ CORRECCIÓN 2: La función ahora detiene el contador y actualiza el estado.
   void _onEnCamino(PusherEvent? e) {
-    if (mounted) {
-      setState(() {
-        _estadoTexto = '¡Tu cuidador va en camino!';
-        _stopCountdown();
-      });
-    }
+    if (mounted) setState(() { _estadoTexto = '¡Tu cuidador va en camino!'; _stopCountdown(); });
   }
 
-  void _onDerivada(PusherEvent? e) => setState(() => _estadoTexto = 'Derivando al siguiente cuidador…');
+  void _onDerivada(PusherEvent? e) { if(mounted) setState(() => _estadoTexto = 'Derivando al siguiente cuidador…'); }
   void _onCompletada(PusherEvent? e) => _resetAlerta('Alerta finalizada.');
   
   void _resetAlerta(String finalState) {
@@ -204,22 +199,117 @@ class _HomePageState extends State<HomePage> {
   void _startCountdown() { _sosTimer?.cancel(); _sosTimer = Timer.periodic(const Duration(seconds: 1), (_) { if (mounted && _countdown > 0) setState(() => _countdown--); }); }
   void _stopCountdown() { _sosTimer?.cancel(); if (mounted) setState(() {}); }
   
-  void _startAdultoTrail() { /* ... (código sin cambios) ... */ }
-  void _stopAdultoTrail() { /* ... (código sin cambios) ... */ }
-  void _startHeartbeatUbicacion(String token) { /* ... (código sin cambios) ... */ }
-  Future<void> _sendLocationOnce(String token) async { /* ... (código sin cambios) ... */ }
-  Future<Position?> _getCurrentPosition() async { /* ... (código sin cambios) ... */ }
-  Future<void> _acceptIncoming(_IncomingAlert item) async { /* ... (código sin cambios) ... */ }
-  Future<void> _deriveIncoming(_IncomingAlert item) async { /* ... (código sin cambios) ... */ }
-  void _goInvitar() { /* ... (código sin cambios) ... */ }
-  void _goAceptarVinculo() { /* ... (código sin cambios) ... */ }
-  void _goMisVinculos() { /* ... (código sin cambios) ... */ }
-  Future<void> _logout() async { /* ... (código sin cambios) ... */ }
+  void _startAdultoTrail() {
+    _stopAdultoTrail();
+    if (_alertaId == null) return;
+    _adultoTrailTimer = Timer.periodic(const Duration(seconds: 7), (_) async {
+      if (_alertaId == null || !mounted) return;
+      final pos = await _getCurrentPosition();
+      if (pos != null) {
+        try { await AlertasApi.registrarPosicionAlerta(_alertaId!, pos.latitude, pos.longitude, precision: pos.accuracy); } catch (_) {}
+      }
+    });
+  }
+  void _stopAdultoTrail() => _adultoTrailTimer?.cancel();
+  
+  void _startHeartbeatUbicacion(String token) { 
+    _hbTimer?.cancel();
+    _hbTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+      if (mounted) await _sendLocationOnce(token);
+    });
+  }
+  
+  Future<void> _sendLocationOnce(String token) async {
+    final pos = await _getCurrentPosition();
+    if (pos != null) {
+      try { await AlertasApi.registrarUbicacion(pos.latitude, pos.longitude, precision: pos.accuracy); } catch (_) {}
+    }
+  }
+  
+  Future<Position?> _getCurrentPosition() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return null;
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) return null;
+      return await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+    } catch (e) {
+      print("Error obteniendo posición: $e");
+      return null;
+    }
+  }
+
+  // ===== ACCIONES DE UI (CORREGIDAS Y CON LOGS) =====
+  Future<void> _acceptIncoming(_IncomingAlert item) async {
+    print("📲 Botón 'Aceptar' presionado para alerta: ${item.alertaId}");
+    try {
+      await AlertasApi.aceptarAlerta(item.alertaId);
+      print("✅ API 'aceptarAlerta' exitosa. Actualizando UI...");
+      if (!mounted) return;
+      
+      setState(() => _incoming.removeWhere((e) => e.alertaId == item.alertaId));
+      
+      if (item.lat != null && item.lon != null) {
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => MapaAlertaPage(alertaId: item.alertaId, lat: item.lat!, lon: item.lon!)));
+      }
+    } catch (e) {
+      print("❌ Error al aceptar alerta: $e");
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al aceptar la alerta: $e')));
+    }
+  }
+
+  Future<void> _deriveIncoming(_IncomingAlert item) async {
+    print("📲 Botón 'Derivar' presionado para alerta: ${item.alertaId}");
+    try {
+      await AlertasApi.derivarAlerta(item.alertaId);
+      print("✅ API 'derivarAlerta' exitosa. Actualizando UI...");
+      if (mounted) {
+        // ✅ CORRECCIÓN: La actualización del estado ahora está dentro del 'if (mounted)'
+        setState(() => _incoming.removeWhere((e) => e.alertaId == item.alertaId));
+      }
+    } catch (e) {
+      print("❌ Error al derivar alerta: $e");
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al derivar la alerta: $e')));
+    }
+  }
+  
+  void _goInvitar() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const VincularPage()));
+  void _goAceptarVinculo() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AceptarVinculoPage()));
+  void _goMisVinculos() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MisVinculosPage()));
+  
+  Future<void> _logout() async {
+    _hbTimer?.cancel();
+    await context.read<AuthState>().logout();
+    AlertasApi.dispose();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginPage()), (route) => false);
+  }
   
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar( /* ... (código sin cambios) ... */ ),
+      appBar: AppBar(
+        title: Text(_esAdultoMayor ? 'AlertaVital' : 'AlertaVital — Cuidador'),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              switch (value) {
+                case 'invitar': _goInvitar(); break;
+                case 'aceptar': _goAceptarVinculo(); break;
+                case 'vinculos': _goMisVinculos(); break;
+                case 'logout': _logout(); break;
+              }
+            },
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              const PopupMenuItem<String>(value: 'invitar', child: ListTile(leading: Icon(Icons.link), title: Text('Enviar Invitación'))),
+              const PopupMenuItem<String>(value: 'aceptar', child: ListTile(leading: Icon(Icons.person_add_alt_1), title: Text('Aceptar Invitación'))),
+              const PopupMenuItem<String>(value: 'vinculos', child: ListTile(leading: Icon(Icons.group_outlined), title: Text('Mis Vínculos'))),
+              const PopupMenuDivider(),
+              const PopupMenuItem<String>(value: 'logout', child: ListTile(leading: Icon(Icons.power_settings_new), title: Text('Cerrar Sesión'))),
+            ],
+          ),
+        ],
+      ),
       body: Center(
         child: !_isServicesInitialized
             ? const CircularProgressIndicator()
@@ -241,7 +331,6 @@ class _HomePageState extends State<HomePage> {
                 ? Column(children: [
                     _StatusChip(text: _estadoTexto, color: Theme.of(context).colorScheme.secondaryContainer),
                     const SizedBox(height: 8),
-                    // ✅ CORRECCIÓN 3: El contador solo se muestra si el timer está activo
                     if (_sosTimer?.isActive ?? false) _CountdownDisplay(value: _countdown),
                   ])
                 : const _StatusChip(text: 'Presiona para pedir ayuda', color: Colors.transparent),
@@ -265,7 +354,6 @@ class _HomePageState extends State<HomePage> {
 // WIDGETS Y CLASES AUXILIARES
 // ============================================================================
 
-// ✅ SE AÑADE EL CAMPO 'adultoNombre'
 class _IncomingAlert {
   final String alertaId;
   final String adultoNombre;
@@ -300,7 +388,7 @@ class _CaregiverView extends StatelessWidget {
   }
 }
 
-// ✅ WIDGET DE LA TARJETA COMPLETAMENTE REDISEÑADO
+// ✅ WIDGET DE TARJETA CON BOTONES CORREGIDOS Y MEJORADO
 class _IncomingCard extends StatelessWidget {
   final _IncomingAlert item;
   final VoidCallback onAccept;
@@ -334,10 +422,27 @@ class _IncomingCard extends StatelessWidget {
             if (isExpired)
               const Center(child: Text('Tiempo agotado. La alerta fue derivada.', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w500, color: Colors.grey)))
             else
+              // ✅ CORRECCIÓN FINAL: BOTONES ENVUELTOS EN EXPANDED
               Row(children: [
-                Expanded(child: OutlinedButton(onPressed: onDerive, child: const Text('Derivar'))),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.redo_outlined),
+                    label: const Text('Derivar'),
+                    onPressed: onDerive,
+                  ),
+                ),
                 const SizedBox(width: 12),
-                Expanded(child: FilledButton(onPressed: onAccept, child: const Text('Voy en Camino'))),
+                Expanded(
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.directions_run),
+                    label: const Text('Voy en Camino'),
+                    onPressed: onAccept,
+                    style: FilledButton.styleFrom(
+                      foregroundColor: theme.colorScheme.onPrimary,
+                      backgroundColor: theme.colorScheme.primary,
+                    ),
+                  ),
+                ),
               ]),
           ],
         ),
@@ -346,7 +451,6 @@ class _IncomingCard extends StatelessWidget {
   }
 }
 
-// Widget auxiliar para el nuevo diseño
 class _InfoRow extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -365,8 +469,6 @@ class _InfoRow extends StatelessWidget {
     );
   }
 }
-
-// ... (El resto de widgets auxiliares como SosBigButton, etc. no necesitan cambios)
 
 class SosBigButton extends StatelessWidget {
   final VoidCallback? onPressed;
