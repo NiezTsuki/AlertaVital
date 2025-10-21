@@ -12,7 +12,7 @@ import 'pages/login_page.dart';
 import 'pages/register_page.dart';
 import 'theme/app_theme.dart';
 
-// ✅ NUEVO: Handler para notificaciones en segundo plano
+// Handler para notificaciones en segundo plano
 // Esta función DEBE estar fuera de una clase.
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {

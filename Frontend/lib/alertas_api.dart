@@ -6,7 +6,7 @@ import 'package:pusher_channels_flutter/pusher_channels_flutter.dart';
 class AlertasApi {
   // ===== Configuración =====
   static String _baseUrl = const String.fromEnvironment('API_BASE',
-      defaultValue: 'https://alerta-vital-nine.vercel.app');
+      defaultValue: 'https://alertavital.xyz');
   static String? _token;
 
   static void configure({required String baseUrl, required String token}) {

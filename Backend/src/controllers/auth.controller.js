@@ -40,7 +40,7 @@ export async function register(req, res) {
     );
 
     // Debes tener una variable FRONTEND_URL 
-    const verificationUrl = `${config.frontendUrl}/verify-email?token=${verificationToken}`;
+const verificationUrl = `${config.frontendUrl}?token=${verificationToken}`;
 
     await resend.emails.send({
       from: 'AlertaVital <noreply@alertavital.xyz>',
