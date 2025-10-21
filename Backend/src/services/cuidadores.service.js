@@ -1,22 +1,8 @@
-// src/services/cuidadores.service.js
-import { pool } from '../db/pool.js';
+import { prisma } from '../db/prisma.js';
+import { getUserById, findUserByEmail as getUserByCorreo } from './user.service.js'; 
 
-// Helpers
-export async function getUserById(id) {
-  const { rows } = await pool.query(
-    'SELECT id, rol, nombre_completo, correo, telefono FROM usuarios WHERE id=$1',
-    [id]
-  );
-  return rows[0] || null;
-}
-
-export async function getUserByCorreo(correo) {
-  const { rows } = await pool.query(
-    'SELECT id, rol, nombre_completo, correo, telefono FROM usuarios WHERE correo=$1',
-    [correo]
-  );
-  return rows[0] || null;
-}
+// Exportamos la función importada para mantener la compatibilidad con el controlador
+export { getUserByCorreo }; 
 
 export async function assertUserRole(id, rolEsperado) {
   const u = await getUserById(id);
@@ -27,42 +13,86 @@ export async function assertUserRole(id, rolEsperado) {
 
 // Vínculo
 export async function vincularCuidador({ adultoId, cuidadorId }) {
-  await pool.query(
-    `INSERT INTO cuidadores (adulto_id, cuidador_id)
-     VALUES ($1,$2)
-     ON CONFLICT (adulto_id, cuidador_id) DO NOTHING`,
-    [adultoId, cuidadorId]
-  );
+  // 'upsert' de Prisma es la forma segura y eficiente de hacer "INSERT ... ON CONFLICT DO NOTHING".
+  // Intenta crear el vínculo, pero si ya existe (basado en la clave única), no hace nada.
+  return await prisma.cuidadores.upsert({
+    where: {
+      // Usamos el nombre de la restricción única definida en tu schema.prisma
+      adulto_id_cuidador_id_unique: {
+        adulto_id: adultoId,
+        cuidador_id: cuidadorId,
+      },
+    },
+    update: {}, // No hacemos nada si el vínculo ya existe
+    create: {
+      adulto_id: adultoId,
+      cuidador_id: cuidadorId,
+    },
+  });
 }
 
 export async function desvincularCuidador({ adultoId, cuidadorId }) {
-  const { rowCount } = await pool.query(
-    `DELETE FROM cuidadores WHERE adulto_id=$1 AND cuidador_id=$2`,
-    [adultoId, cuidadorId]
-  );
-  return rowCount > 0;
+  try {
+    // Prisma.delete intenta eliminar el registro basado en la clave única.
+    await prisma.cuidadores.delete({
+      where: {
+        adulto_id_cuidador_id_unique: {
+          adulto_id: adultoId,
+          cuidador_id: cuidadorId,
+        },
+      },
+    });
+    return true; // Se eliminó con éxito.
+  } catch (e) {
+    // Prisma lanza un error (código P2025) si el registro a eliminar no se encuentra.
+    // Capturamos este error específico para replicar la lógica anterior y devolver 'false'.
+    if (e.code === 'P2025') {
+      return false; // El vínculo no existía.
+    }
+    // Si es otro tipo de error, lo lanzamos para que se maneje más arriba.
+    throw e;
+  }
 }
 
 export async function listarCuidadoresDeAdulto(adultoId) {
-  const { rows } = await pool.query(
-    `SELECT u.id AS cuidador_id, u.nombre_completo, u.correo, u.telefono, c.creado_en
-     FROM cuidadores c
-     JOIN usuarios u ON u.id = c.cuidador_id
-     WHERE c.adulto_id = $1
-     ORDER BY c.creado_en DESC`,
-    [adultoId]
-  );
-  return rows;
+  const vinculos = await prisma.cuidadores.findMany({
+    where: { adulto_id: adultoId },
+    // Le decimos que incluya los datos del usuario relacionado a través de la relación del cuidador.
+    include: {
+      usuarios_cuidadores_cuidador_idTousuarios: {
+        select: { id: true, nombre_completo: true, correo: true, telefono: true }
+      }
+    },
+    orderBy: { creado_en: 'desc' }
+  });
+
+  // Mapeamos el resultado para que tenga exactamente el mismo formato que esperaba el controlador.
+  return vinculos.map(v => ({
+    cuidador_id: v.usuarios_cuidadores_cuidador_idTousuarios.id,
+    nombre_completo: v.usuarios_cuidadores_cuidador_idTousuarios.nombre_completo,
+    correo: v.usuarios_cuidadores_cuidador_idTousuarios.correo,
+    telefono: v.usuarios_cuidadores_cuidador_idTousuarios.telefono,
+    creado_en: v.creado_en
+  }));
 }
 
 export async function listarAdultosDeCuidador(cuidadorId) {
-  const { rows } = await pool.query(
-    `SELECT u.id AS adulto_id, u.nombre_completo, u.correo, u.telefono, c.creado_en
-     FROM cuidadores c
-     JOIN usuarios u ON u.id = c.adulto_id
-     WHERE c.cuidador_id = $1
-     ORDER BY c.creado_en DESC`,
-    [cuidadorId]
-  );
-  return rows;
+  const vinculos = await prisma.cuidadores.findMany({
+    where: { cuidador_id: cuidadorId },
+    include: {
+      usuarios_cuidadores_adulto_idTousuarios: {
+        select: { id: true, nombre_completo: true, correo: true, telefono: true }
+      }
+    },
+    orderBy: { creado_en: 'desc' }
+  });
+
+  // Mapeamos el resultado para que tenga exactamente el mismo formato que esperaba el controlador.
+  return vinculos.map(v => ({
+    adulto_id: v.usuarios_cuidadores_adulto_idTousuarios.id,
+    nombre_completo: v.usuarios_cuidadores_adulto_idTousuarios.nombre_completo,
+    correo: v.usuarios_cuidadores_adulto_idTousuarios.correo,
+    telefono: v.usuarios_cuidadores_adulto_idTousuarios.telefono,
+    creado_en: v.creado_en
+  }));
 }

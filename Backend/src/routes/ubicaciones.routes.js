@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth.js';
-import { pool } from '../db/pool.js';
+import { prisma } from '../db/prisma.js';
 
 const router = Router();
 
@@ -9,17 +9,23 @@ router.post('/ubicaciones', auth, async (req, res) => {
   try {
     const userId = req.user.sub;
     const { latitud, longitud, precision_metros } = req.body || {};
+    
     if (typeof latitud !== 'number' || typeof longitud !== 'number') {
       return res.status(400).json({ error: 'latitud y longitud numéricos requeridos' });
     }
-    await pool.query(
-      `INSERT INTO ubicaciones (usuario_id, latitud, longitud, precision_metros, detectado_en)
-       VALUES ($1,$2,$3,$4,NOW())`,
-      [userId, latitud, longitud, precision_metros ?? null]
-    );
+
+    await prisma.ubicaciones.create({
+      data: {
+        usuario_id: userId,
+        latitud: latitud,
+        longitud: longitud,
+        precision_metros: precision_metros,
+      },
+    });
+    
     res.json({ ok: true });
   } catch (e) {
-    console.error(e);
+    console.error(`[ERROR /api/ubicaciones]`, e);
     res.status(500).json({ error: 'No se pudo guardar la ubicación' });
   }
 });
@@ -28,17 +34,24 @@ router.post('/ubicaciones', auth, async (req, res) => {
 router.get('/ubicaciones/ultima/:usuarioId', auth, async (req, res) => {
   try {
     const { usuarioId } = req.params;
-    const { rows } = await pool.query(
-      `SELECT latitud, longitud, precision_metros, detectado_en
-         FROM ubicaciones
-        WHERE usuario_id=$1
-        ORDER BY detectado_en DESC
-        LIMIT 1`,
-      [usuarioId]
-    );
-    res.json(rows[0] ?? null);
+    const lastLocation = await prisma.ubicaciones.findFirst({
+      where: {
+        usuario_id: usuarioId,
+      },
+      orderBy: {
+        detectado_en: 'desc',
+      },
+      select: {
+        latitud: true,
+        longitud: true,
+        precision_metros: true,
+        detectado_en: true,
+      },
+    });
+    
+    res.json(lastLocation ?? null);
   } catch (e) {
-    console.error(e);
+    console.error(`[ERROR /api/ubicaciones/ultima/:usuarioId]`, e);
     res.status(500).json({ error: 'No se pudo obtener la ubicación' });
   }
 });

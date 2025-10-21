@@ -1,9 +1,9 @@
 import Pusher from 'pusher';
 import admin from 'firebase-admin';
-import { pool } from '../db/pool.js';
+import { prisma } from '../db/prisma.js'; 
 import { config } from '../config/env.js';
 
-// INICIALIZA FIREBASE ADMIN SDK
+// Inicialización Firebase y Pusher 
 if (!admin.apps.length && config.firebaseServiceAccountJson) {
   try {
     const serviceAccount = JSON.parse(config.firebaseServiceAccountJson);
@@ -12,12 +12,11 @@ if (!admin.apps.length && config.firebaseServiceAccountJson) {
     });
     console.log(`[FCM] Firebase Admin SDK inicializado para proyecto: ${serviceAccount.project_id}`);
   } catch (e) {
-    console.error('[FCM] Error al inicializar Firebase Admin SDK. Revisa la variable de entorno FIREBASE_SERVICE_ACCOUNT_JSON.', e.message);
+    console.error('[FCM] Error al inicializar Firebase Admin SDK.', e.message);
   }
 } else if (!config.firebaseServiceAccountJson) {
-    console.warn('[FCM] La variable de entorno FIREBASE_SERVICE_ACCOUNT_JSON no fue encontrada. No se enviarán notificaciones push.');
+    console.warn('[FCM] La variable de entorno FIREBASE_SERVICE_ACCOUNT_JSON no fue encontrada.');
 }
-
 
 const pusher = new Pusher({
   appId: config.pusherAppId,
@@ -27,279 +26,196 @@ const pusher = new Pusher({
   useTLS: true
 });
 
+
 async function sendPushNotification(userId, title, body, data) {
-  if (!admin.apps.length) {
-    console.warn('[FCM] Firebase Admin no está inicializado. No se enviará la notificación.');
-    return;
-  }
-
-  try {
-    // 1) Consultar token con manejo de errores y guardando el tiempo
-    const start = Date.now();
-    const res = await pool.query({
-      text: 'SELECT fcm_token FROM usuarios WHERE id = $1',
-      values: [userId],
-      // Opcional: statement_timeout si soporta tu cliente / configuración
-    });
-    const duration = Date.now() - start;
-    console.log(`[FCM] Consulta token para ${userId} en ${duration}ms, filas=${res.rowCount}`);
-
-    const token = res.rows[0]?.fcm_token;
-    if (!token) {
-      console.log(`[FCM] Usuario ${userId} no tiene token FCM.`);
-      return;
-    }
-
-    // 2) Intentar enviar a FCM con reintentos simples (por si es error de red temporal)
-    const maxAttempts = 3;
-    let attempt = 0;
-    while (attempt < maxAttempts) {
-      try {
-        attempt++;
-        console.log(`[FCM] Enviando notificación (intento ${attempt}) a usuario ${userId}`);
-        await admin.messaging().send({
-          token,
-          notification: { title, body },
-          data,
-          android: { priority: 'high' },
-          apns: { payload: { aps: { 'content-available': 1, sound: 'default' } } }
-        });
-        console.log('[FCM] Notificación enviada exitosamente.');
-        break; // éxito -> salir del loop
-      } catch (fcmErr) {
-        console.error(`[FCM] Error envío intento ${attempt} a ${userId}:`, fcmErr.code ?? fcmErr.message ?? fcmErr);
-        // si no quedan intentos, re-lanzar o manejar
-        if (attempt >= maxAttempts) {
-          console.error('[FCM] Fallaron todos los intentos de envío.');
+    
+    if (!admin.apps.length) { console.warn('[FCM] Firebase Admin no está inicializado.'); return; }
+    try {
+        const user = await prisma.usuarios.findUnique({ where: { id: userId }, select: { fcm_token: true } });
+        const token = user?.fcm_token;
+        if (token) {
+            console.log(`[FCM] Enviando notificación a usuario ${userId}`);
+            await admin.messaging().send({ token, notification: { title, body }, data, android: { priority: 'high' }, apns: { payload: { aps: { 'content-available': 1, sound: 'default' } } } });
+            console.log('[FCM] Notificación enviada exitosamente.');
         } else {
-          // espera exponencial simple antes del siguiente intento
-          await new Promise(r => setTimeout(r, 200 * attempt));
+            console.log(`[FCM] Usuario ${userId} no tiene token FCM.`);
         }
-      }
+    } catch (error) {
+        console.error(`[FCM] Error al enviar notificación a ${userId}:`, error);
     }
-  } catch (error) {
-    // Diferenciar errores de PG y otros
-    if (error.code) {
-      console.error(`[FCM] Error en DB al buscar token para ${userId}:`, error.code, error.message);
-    } else {
-      console.error(`[FCM] Error inesperado al enviar a ${userId}:`, error);
-    }
-  }
 }
-
-
 
 const activeTimers = new Map();
 
-function clearCountdown(alertaId) {
-  if (activeTimers.has(alertaId)) {
-    clearTimeout(activeTimers.get(alertaId));
-    activeTimers.delete(alertaId);
-  }
-}
+function clearCountdown(alertaId) { if (activeTimers.has(alertaId)) { clearTimeout(activeTimers.get(alertaId)); activeTimers.delete(alertaId); } }
+function startCountdown(alertaId, seconds) { clearCountdown(alertaId); const timer = setTimeout(() => onCountdownExpired(alertaId), seconds * 1000); activeTimers.set(alertaId, timer); }
+function haversineDistance(lat1, lon1, lat2, lon2) { const R = 6371; const dLat = (lat2 - lat1) * Math.PI / 180; const dLon = (lon2 - lon1) * Math.PI / 180; const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2); const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); return R * c; }
 
-function startCountdown(alertaId, seconds) {
-  clearCountdown(alertaId);
-  const timer = setTimeout(() => onCountdownExpired(alertaId), seconds * 1000);
-  activeTimers.set(alertaId, timer);
-}
 
-function haversineDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371; // Radio de la Tierra en km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c; // Distancia en km
-}
+async function pickNearestNow(prismaTx, { alertaId, adultoId, lat, lon }) {
+  const assignedCaregiverIds = await prismaTx.alertas_asignaciones.findMany({
+    where: { alerta_id: alertaId },
+    select: { cuidador_id: true }
+  });
 
-async function pickNearestNow(client, { alertaId, adultoId, lat, lon }) {
-  const { rows: cuidadores } = await client.query(
-    `SELECT c.cuidador_id FROM cuidadores c
-     WHERE c.adulto_id = $1
-       AND c.cuidador_id NOT IN (
-         SELECT aa.cuidador_id FROM alertas_asignaciones aa WHERE aa.alerta_id = $2
-       )`,
-    [adultoId, alertaId]
-  );
-  if (cuidadores.length === 0) {
-    console.log(`[pickNearestNow] No se encontraron cuidadores vinculados y disponibles para el adulto ${adultoId} en la alerta ${alertaId}`);
-    return null;
-  }
-  const cuidadorIds = cuidadores.map(c => c.cuidador_id);
-  const { rows: ubicaciones } = await client.query(
-    `SELECT DISTINCT ON (usuario_id) usuario_id, latitud, longitud
-     FROM ubicaciones
-     WHERE usuario_id = ANY($1::uuid[])
-     ORDER BY usuario_id, detectado_en DESC`,
-    [cuidadorIds]
-  );
-  if (ubicaciones.length === 0) {
-    console.log(`[pickNearestNow] Ninguno de los cuidadores disponibles (${cuidadorIds.join(', ')}) tiene una ubicación registrada.`);
-    return null;
-  }
-  const nearest = ubicaciones.reduce((closest, current) => {
+  const availableCaregivers = await prismaTx.cuidadores.findMany({
+    where: {
+      adulto_id: adultoId,
+      cuidador_id: { notIn: assignedCaregiverIds.map(c => c.cuidador_id) }
+    },
+    select: { cuidador_id: true }
+  });
+
+  if (availableCaregivers.length === 0) return null;
+
+  const caregiverIds = availableCaregivers.map(c => c.cuidador_id);
+  
+  const locations = await prismaTx.ubicaciones.findMany({
+    where: { usuario_id: { in: caregiverIds } },
+    distinct: ['usuario_id'],
+    orderBy: { detectado_en: 'desc' }
+  });
+
+  if (locations.length === 0) return null;
+
+  const nearest = locations.reduce((closest, current) => {
     const distance = haversineDistance(lat, lon, current.latitud, current.longitud);
     if (distance < closest.distance) {
       return { distance, cuidador_id: current.usuario_id };
     }
     return closest;
   }, { distance: Infinity, cuidador_id: null });
-  if (nearest.cuidador_id) {
-    console.log(`[pickNearestNow] Cuidador más cercano encontrado: ${nearest.cuidador_id} a ${nearest.distance.toFixed(2)} km.`);
-    return nearest;
-  }
-  return null;
+
+  return nearest.cuidador_id ? nearest : null;
 }
 
 async function notifyEmergencyToAdult(alertaId) {
-  const { rows } = await pool.query(`SELECT usuario_id FROM alertas WHERE id=$1`, [alertaId]);
-  const adultoId = rows[0]?.usuario_id;
-  await pool.query(`UPDATE alertas SET estado='CERRADA' WHERE id=$1`, [alertaId]);
-  if (adultoId) {
-    pusher.trigger(`private-user-${adultoId}`, 'alerta_emergencia', { alertaId });
+  const alerta = await prisma.alertas.update({
+    where: { id: alertaId },
+    data: { estado: 'CERRADA' },
+    select: { usuario_id: true }
+  });
+  if (alerta.usuario_id) {
+    pusher.trigger(`private-user-${alerta.usuario_id}`, 'alerta_emergencia', { alertaId });
   }
 }
 
 async function onCountdownExpired(alertaId) {
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-    const { rows: [alerta] } = await client.query('SELECT * FROM alertas WHERE id=$1', [alertaId]);
-    if (!alerta) { await client.query('ROLLBACK'); return; }
+    await prisma.$transaction(async (prismaTx) => {
+      const alerta = await prismaTx.alertas.findUnique({ where: { id: alertaId } });
+      if (!alerta) return;
 
-    const { rows: [lastAssigned] } = await client.query(`UPDATE alertas_asignaciones SET estado='EXPIRADA' WHERE alerta_id=$1 AND estado='PENDIENTE' RETURNING *`, [alertaId]);
-    
-    if (lastAssigned && lastAssigned.cuidador_id) {
-      pusher.trigger(`private-user-${lastAssigned.cuidador_id}`, 'asignacion_expirada', { 
-        alertaId: alertaId 
+      const lastAssigned = await prismaTx.alertas_asignaciones.update({
+        where: { alerta_id_estado: { alerta_id: alertaId, estado: 'PENDIENTE' } }, 
+        data: { estado: 'EXPIRADA' }
       });
-    }
-    
-    const nextCuidador = await pickNearestNow(client, { alertaId: alerta.id, adultoId: alerta.usuario_id, lat: alerta.latitud, lon: alerta.longitud });
-    
-    if (nextCuidador && nextCuidador.cuidador_id) {
-      const nextOrden = (lastAssigned?.orden || 0) + 1;
-      await client.query(`INSERT INTO alertas_asignaciones (alerta_id, cuidador_id, orden, estado) VALUES ($1,$2,$3,'PENDIENTE')`, [alerta.id, nextCuidador.cuidador_id, nextOrden]);
-      await client.query('COMMIT');
-      
-      pusher.trigger(`private-user-${nextCuidador.cuidador_id}`, 'alerta_nueva', { alertaId: alerta.id, orden: nextOrden, latitud: alerta.latitud, longitud: alerta.longitud });
-      
-      sendPushNotification(
-        nextCuidador.cuidador_id,
-        'Emergencia Asignada',
-        'Se requiere tu ayuda para una alerta de AlertaVital.',
-        { alertaId: alerta.id.toString(), click_action: 'FLUTTER_NOTIFICATION_CLICK' }
-      );
 
-      pusher.trigger(`private-alerta-${alerta.id}`, 'derivada_siguiente', { alertaId: alerta.id, nextOrden });
-      startCountdown(alerta.id, alerta.countdown_seg);
-    } else {
-      await client.query('COMMIT');
-      await notifyEmergencyToAdult(alerta.id);
-    }
+      if (lastAssigned?.cuidador_id) {
+        pusher.trigger(`private-user-${lastAssigned.cuidador_id}`, 'asignacion_expirada', { alertaId });
+      }
+
+      const nextCuidador = await pickNearestNow(prismaTx, { alertaId, adultoId: alerta.usuario_id, lat: alerta.latitud, lon: alerta.longitud });
+
+      if (nextCuidador?.cuidador_id) {
+        const nextOrden = (lastAssigned?.orden || 0) + 1;
+        await prismaTx.alertas_asignaciones.create({
+          data: {
+            alerta_id: alertaId,
+            cuidador_id: nextCuidador.cuidador_id,
+            orden: nextOrden,
+            estado: 'PENDIENTE'
+          }
+        });
+
+        pusher.trigger(`private-user-${nextCuidador.cuidador_id}`, 'alerta_nueva', { alertaId, orden: nextOrden, latitud: alerta.latitud, longitud: alerta.longitud });
+        sendPushNotification(nextCuidador.cuidador_id, 'Emergencia Asignada', 'Se requiere tu ayuda para una alerta de AlertaVital.', { alertaId: alerta.id.toString(), click_action: 'FLUTTER_NOTIFICATION_CLICK' });
+        pusher.trigger(`private-alerta-${alertaId}`, 'derivada_siguiente', { alertaId, nextOrden });
+        startCountdown(alertaId, alerta.countdown_seg);
+      } else {
+        await notifyEmergencyToAdult(alertaId);
+      }
+    });
   } catch(e) { 
-    await client.query('ROLLBACK'); 
     console.error("Error en onCountdownExpired:", e);
-  } finally { 
-    client.release(); 
   }
 }
+
 export async function crearAlertaRT({ adultoId, tipo, descripcion, latitud, longitud, precision_metros }) {
-  // ✅ COUNTDOWN AJUSTADO A 90 SEGUNDOS
   const countdownSeg = 90;
-  const client = await pool.connect();
+  
   try {
-    await client.query('BEGIN');
-    const qAlerta = `INSERT INTO alertas (usuario_id, tipo, descripcion, countdown_seg, latitud, longitud, precision_metros, creada_en) VALUES ($1,$2,$3,$4,$5,$6,$7, NOW()) RETURNING *`;
-    const { rows: [alerta] } = await client.query(qAlerta, [adultoId, tipo, descripcion, countdownSeg, latitud, longitud, precision_metros]);
-    const nearest = await pickNearestNow(client, { alertaId: alerta.id, adultoId, lat: alerta.latitud, lon: alerta.longitud });
-    if (nearest && nearest.cuidador_id) {
-      await client.query(`INSERT INTO alertas_asignaciones (alerta_id, cuidador_id, orden, estado) VALUES ($1,$2,1,'PENDIENTE')`, [alerta.id, nearest.cuidador_id]);
-    }
-    await client.query('COMMIT');
-    
-    pusher.trigger(`private-user-${adultoId}`, 'alerta_creada', { alertaId: alerta.id, countdown: countdownSeg });
-    
-    if (nearest && nearest.cuidador_id) {
-      pusher.trigger(`private-user-${nearest.cuidador_id}`, 'alerta_nueva', {
-        alertaId: alerta.id, orden: 1, latitud: alerta.latitud, longitud: alerta.longitud, precision_metros: alerta.precision_metros
+    const alerta = await prisma.alertas.create({
+      data: {
+        usuario_id: adultoId,
+        tipo,
+        descripcion,
+        countdown_seg: countdownSeg,
+        latitud,
+        longitud,
+        precision_metros,
+      }
+    });
+
+    const nearest = await pickNearestNow(prisma, { alertaId: alerta.id, adultoId, lat: alerta.latitud, lon: alerta.longitud });
+
+    if (nearest?.cuidador_id) {
+      await prisma.alertas_asignaciones.create({
+        data: {
+          alerta_id: alerta.id,
+          cuidador_id: nearest.cuidador_id,
+          orden: 1,
+          estado: 'PENDIENTE'
+        }
       });
       
-      sendPushNotification(
-        nearest.cuidador_id,
-        '¡Nueva Alerta de Emergencia!',
-        'Un adulto mayor necesita tu ayuda urgentemente.',
-        { alertaId: alerta.id.toString(), click_action: 'FLUTTER_NOTIFICATION_CLICK' }
-      );
-
+      pusher.trigger(`private-user-${nearest.cuidador_id}`, 'alerta_nueva', { alertaId: alerta.id, orden: 1, latitud: alerta.latitud, longitud: alerta.longitud, precision_metros: alerta.precision_metros });
+      sendPushNotification(nearest.cuidador_id, '¡Nueva Alerta de Emergencia!', 'Un adulto mayor necesita tu ayuda urgentemente.', { alertaId: alerta.id.toString(), click_action: 'FLUTTER_NOTIFICATION_CLICK' });
       startCountdown(alerta.id, countdownSeg);
     } else {
       await notifyEmergencyToAdult(alerta.id);
     }
+    
+    pusher.trigger(`private-user-${adultoId}`, 'alerta_creada', { alertaId: alerta.id, countdown: countdownSeg });
     return { alertaId: alerta.id, countdown: countdownSeg };
   } catch (e) { 
-    await client.query('ROLLBACK'); 
     console.error("Error en crearAlertaRT:", e);
-    throw e; 
-  } finally { 
-    client.release(); 
+    throw e;
   }
 }
 
-// ✅ FUNCIÓN CORREGIDA
 export async function aceptarAlerta({ alertaId, cuidadorId }) {
   clearCountdown(alertaId);
-  
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    const { alerta, cuidador } = await prisma.$transaction(async (prismaTx) => {
+      await prismaTx.alertas_asignaciones.update({
+        where: { alerta_id_cuidador_id: { alerta_id: alertaId, cuidador_id: cuidadorId } }, 
+        data: { estado: 'EN_CAMINO', respondida_en: new Date() }
+      });
+      const alerta = await prismaTx.alertas.findUnique({ where: { id: alertaId }, select: { usuario_id: true } });
+      const cuidador = await prismaTx.usuarios.findUnique({ where: { id: cuidadorId }, select: { nombre_completo: true } });
+      return { alerta, cuidador };
+    });
 
-    // Actualiza la asignación al estado correcto ('EN_CAMINO')
-    await client.query(
-      `UPDATE alertas_asignaciones SET estado='EN_CAMINO', respondida_en=NOW() WHERE alerta_id=$1 AND cuidador_id=$2`,
-      [alertaId, cuidadorId]
-    );
-    
-    // Obtiene el ID del adulto y el nombre del cuidador para las notificaciones
-    const resAlerta = await client.query(`SELECT usuario_id FROM alertas WHERE id = $1`, [alertaId]);
-    const adultoId = resAlerta.rows[0]?.usuario_id;
-    const resCuidador = await client.query(`SELECT nombre_completo FROM usuarios WHERE id = $1`, [cuidadorId]);
-    const cuidadorNombre = resCuidador.rows[0]?.nombre_completo || 'Un cuidador';
-
-    await client.query('COMMIT');
-
-    // Notifica a través de Pusher
+    const cuidadorNombre = cuidador?.nombre_completo || 'Un cuidador';
     pusher.trigger(`private-alerta-${alertaId}`, 'cuidador_en_camino', { alertaId, cuidadorId, cuidadorNombre });
 
-    // Envía notificación push silenciosa de vuelta al adulto mayor
-    if (adultoId) {
-      await sendPushNotification(
-        adultoId,
-        null, // Sin título
-        null, // Sin cuerpo
-        {
-          tipo: 'ALERTA_ACEPTADA',
-          mensaje: `${cuidadorNombre} va en camino.`,
-          alertaId: alertaId.toString(),
-          cuidadorId: cuidadorId.toString()
-        }
-      );
+    if (alerta?.usuario_id) {
+      await sendPushNotification(alerta.usuario_id, null, null, { tipo: 'ALERTA_ACEPTADA', mensaje: `${cuidadorNombre} va en camino.`, alertaId: alertaId.toString(), cuidadorId: cuidadorId.toString() });
     }
     return true;
   } catch (e) {
-    await client.query('ROLLBACK');
-    console.error(`[aceptarAlerta] Error en transacción: ${e.message}`);
+    console.error(`[aceptarAlerta] Error: ${e.message}`);
     throw e;
-  } finally {
-    client.release();
   }
 }
 
-
 export async function derivarAlerta({ alertaId, cuidadorId }) {
-  const { rows } = await pool.query(`SELECT * FROM alertas_asignaciones WHERE alerta_id=$1 AND cuidador_id=$2 AND estado='PENDIENTE'`, [alertaId, cuidadorId]);
-  if (rows.length === 0) return { ok: false, message: 'No tienes esta alerta asignada.' };
+  const assignment = await prisma.alertas_asignaciones.findFirst({
+    where: { alerta_id: alertaId, cuidador_id: cuidadorId, estado: 'PENDIENTE' }
+  });
+  if (!assignment) return { ok: false, message: 'No tienes esta alerta asignada.' };
+  
   clearCountdown(alertaId);
   await onCountdownExpired(alertaId);
   return { ok: true };
@@ -307,24 +223,30 @@ export async function derivarAlerta({ alertaId, cuidadorId }) {
 
 export async function completarAlerta({ alertaId, cuidadorId }) {
   clearCountdown(alertaId);
-  await pool.query(`UPDATE alertas SET estado='CERRADA' WHERE id=$1`, [alertaId]);
+  await prisma.alertas.update({
+    where: { id: alertaId },
+    data: { estado: 'CERRADA' }
+  });
   pusher.trigger(`private-alerta-${alertaId}`, 'alerta_completada', { alertaId });
   return true;
 }
 
 export async function getAlertasPendientesDeCuidador(cuidadorId) {
-  const q = `
-    SELECT
-      a.id AS "alertaId",
-      aa.orden,
-      a.latitud,
-      a.longitud,
-      a.precision_metros
-    FROM alertas_asignaciones aa
-    JOIN alertas a ON a.id = aa.alerta_id
-    WHERE aa.cuidador_id = $1 AND aa.estado = 'PENDIENTE'
-    ORDER BY a.creada_en DESC
-  `;
-  const { rows } = await pool.query(q, [cuidadorId]);
-  return rows;
+  const assignments = await prisma.alertas_asignaciones.findMany({
+    where: { cuidador_id: cuidadorId, estado: 'PENDIENTE' },
+    include: {
+      alertas: {
+        select: { id: true, latitud: true, longitud: true, precision_metros: true }
+      }
+    },
+    orderBy: { alertas: { creada_en: 'desc' } }
+  });
+
+  return assignments.map(a => ({
+    alertaId: a.alertas.id,
+    orden: a.orden,
+    latitud: a.alertas.latitud,
+    longitud: a.alertas.longitud,
+    precision_metros: a.alertas.precision_metros
+  }));
 }

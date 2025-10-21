@@ -1,4 +1,3 @@
-// src/routes/usuarios.routes.js
 import { Router } from 'express';
 import { auth } from '../middleware/auth.js';
 import { updateFcmToken } from '../services/user.service.js';

@@ -1,4 +1,3 @@
-// src/controllers/cuidadores.controller.js
 import jwt from 'jsonwebtoken';
 import { Resend } from 'resend';
 
@@ -57,7 +56,6 @@ export async function postSolicitarVinculo(req, res) {
 
     try {
       await resend.emails.send({
-        // ✅ CORRECCIÓN: Se eliminó el '>' extra al final de la dirección.
         from: 'AlertaVital <onboarding@resend.dev>', 
         to: [receptor.correo],
         subject: `💌 Tienes una invitación para vincularte en AlertaVital`,
@@ -85,7 +83,6 @@ export async function postSolicitarVinculo(req, res) {
       console.log(`Correo de invitación enviado exitosamente a ${receptor.correo}`);
     } catch (emailError) {
       console.error("Error al enviar el correo con Resend:", emailError);
-      // Devuelve un error al cliente si el correo falla, para un mejor feedback.
       return res.status(500).json({ error: 'Se creó la solicitud, pero no se pudo enviar el correo de invitación.' });
     }
 

@@ -1,8 +1,5 @@
-// src/routes/alertas.routes.js
-
 import { Router } from 'express';
 import { auth } from '../middleware/auth.js';
-// Se añade la nueva función importada del servicio
 import { 
   crearAlertaRT, 
   aceptarAlerta, 
@@ -13,7 +10,6 @@ import {
 
 const router = Router();
 
-// ✅ NUEVA RUTA
 // Devuelve las alertas que están asignadas al cuidador logueado y en estado 'PENDIENTE'.
 router.get('/alertas/pendientes', auth, async (req, res) => {
   try {
