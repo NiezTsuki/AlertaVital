@@ -56,7 +56,7 @@ export async function postSolicitarVinculo(req, res) {
 
     try {
       await resend.emails.send({
-        from: 'AlertaVital <onboarding@resend.dev>', 
+        from: 'AlertaVital <noreply@alertavital.xyz>', 
         to: [receptor.correo],
         subject: `💌 Tienes una invitación para vincularte en AlertaVital`,
         html: `
