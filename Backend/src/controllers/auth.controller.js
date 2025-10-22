@@ -42,7 +42,7 @@ export async function register(req, res) {
     // Debes tener una variable FRONTEND_URL 
 const verificationUrl = `${config.frontendUrl}?token=${verificationToken}`;
 
-    await resend.emails.send({
+   await resend.emails.send({
       from: 'AlertaVital <noreply@alertavital.xyz>',
       to: [user.correo],
       subject: 'Verifica tu cuenta en AlertaVital',
@@ -53,8 +53,9 @@ const verificationUrl = `${config.frontendUrl}?token=${verificationToken}`;
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <style>
-            body { margin: 0; padding: 0; background-color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-            .container { max-width: 600px; margin: 40px auto; padding: 20px; text-align: center; color: #333333; }
+            body { margin: 0; padding: 0; background-color: #f2f0f9; /* Color lavanda muy claro de fondo */ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+            .container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border-top: 5px solid #6A5ACD; /* Borde superior morado */ }
+            .content { padding: 40px; text-align: center; color: #333333; }
             .logo { max-width: 130px; margin: 0 auto 30px auto; }
             h1 { font-size: 24px; margin-bottom: 15px; }
             p { margin-bottom: 25px; font-size: 16px; line-height: 1.6; }
@@ -65,18 +66,20 @@ const verificationUrl = `${config.frontendUrl}?token=${verificationToken}`;
         </head>
         <body>
           <div class="container">
-            <img src="https://alerta-vital-ejvs.vercel.app/AlertaVital.png" alt="Logo de AlertaVital" class="logo">
-            <h1>¡Un último paso para activar tu cuenta!</h1>
-            <p>Hola, ${user.nombre_completo},</p>
-            <p>Gracias por registrarte en AlertaVital. Para completar la configuración y asegurar tu cuenta, por favor, haz clic en el botón de abajo.</p>
-            <p>
-              <a href="${verificationUrl}" class="button">Verificar mi Correo</a>
-            </p>
-            <p>Este enlace de verificación es válido por 1 hora.</p>
-            <div class="footer">
-              <p>Si el botón no funciona, copia y pega el siguiente enlace en tu navegador:</p>
-              <p><a href="${verificationUrl}" class="link">${verificationUrl}</a></p>
-              <p style="margin-top: 20px;">Si no creaste esta cuenta, puedes ignorar este correo de forma segura.</p>
+            <div class="content">
+              <img src="https://alerta-vital-ejvs.vercel.app/AlertaVital.png" alt="Logo de AlertaVital" class="logo">
+              <h1>¡Un último paso para activar tu cuenta!</h1>
+              <p>Hola, ${user.nombre_completo},</p>
+              <p>Gracias por registrarte en AlertaVital. Para completar la configuración y asegurar tu cuenta, por favor, haz clic en el botón de abajo.</p>
+              <p>
+                <a href="${verificationUrl}" class="button">Verificar mi Correo</a>
+              </p>
+              <p>Este enlace de verificación es válido por 1 hora.</p>
+              <div class="footer">
+                <p>Si el botón no funciona, copia y pega el siguiente enlace en tu navegador:</p>
+                <p><a href="${verificationUrl}" class="link">${verificationUrl}</a></p>
+                <p style="margin-top: 20px;">Si no creaste esta cuenta, puedes ignorar este correo de forma segura.</p>
+              </div>
             </div>
           </div>
         </body>
