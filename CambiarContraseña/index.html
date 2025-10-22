@@ -52,7 +52,6 @@
             const submitButton = document.getElementById('submitButton');
             const loader = document.getElementById('loader');
             const messageEl = document.getElementById('message');
-            const loginLink = document.getElementById('login-link');
 
             const params = new URLSearchParams(window.location.search);
             const token = params.get('token');
@@ -104,7 +103,6 @@
                     titleEl.textContent = '¡Contraseña Actualizada!';
                     messageEl.textContent = data.message;
                     messageEl.className = 'message success';
-                    loginLink.style.display = 'inline-block';
 
                 } catch (error) {
                     messageEl.textContent = error.message;
