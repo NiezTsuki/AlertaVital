@@ -53,32 +53,26 @@ const verificationUrl = `${config.frontendUrl}?token=${verificationToken}`;
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <style>
-            body { margin: 0; padding: 0; background-color: #f4f7f6; }
-            .container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
-            .header { background-color: #6A5ACD; /* Un morado similar al logo */ padding: 40px; text-align: center; }
-            .header img { max-width: 150px; }
-            .content { padding: 40px; color: #333333; line-height: 1.6; }
-            .content h1 { color: #333333; font-size: 24px; margin-bottom: 15px; }
-            .content p { margin-bottom: 25px; font-size: 16px; }
-            .button { display: inline-block; background-color: #FF6347; /* Un rojo/coral similar al logo */ color: #ffffff; padding: 15px 30px; font-size: 16px; font-weight: bold; text-decoration: none; border-radius: 5px; }
-            .footer { padding: 20px; text-align: center; font-size: 12px; color: #777777; background-color: #f4f7f6; }
+            body { margin: 0; padding: 0; background-color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+            .container { max-width: 600px; margin: 40px auto; padding: 20px; text-align: center; color: #333333; }
+            .logo { max-width: 130px; margin: 0 auto 30px auto; }
+            h1 { font-size: 24px; margin-bottom: 15px; }
+            p { margin-bottom: 25px; font-size: 16px; line-height: 1.6; }
+            .button { display: inline-block; background-color: #FF6347; color: #ffffff !important; padding: 15px 30px; font-size: 16px; font-weight: bold; text-decoration: none; border-radius: 5px; }
+            .footer { margin-top: 30px; font-size: 12px; color: #777777; }
             .link { word-break: break-all; color: #007bff; }
           </style>
         </head>
         <body>
           <div class="container">
-            <div class="header">
-              <img src="https://assets.vercel.com/image/upload/v1700683050/alerta_vital.png" alt="Logo de AlertaVital">
-            </div>
-            <div class="content">
-              <h1>¡Un último paso para activar tu cuenta!</h1>
-              <p>Hola, ${user.nombre_completo},</p>
-              <p>Gracias por registrarte en AlertaVital. Para completar la configuración y asegurar tu cuenta, por favor, verifica tu dirección de correo electrónico haciendo clic en el botón de abajo.</p>
-              <p style="text-align: center;">
-                <a href="${verificationUrl}" class="button">Verificar mi Correo</a>
-              </p>
-              <p>Este enlace de verificación es válido por 1 hora.</p>
-            </div>
+            <img src="https://alerta-vital-ejvs.vercel.app/AlertaVital.png" alt="Logo de AlertaVital" class="logo">
+            <h1>¡Un último paso para activar tu cuenta!</h1>
+            <p>Hola, ${user.nombre_completo},</p>
+            <p>Gracias por registrarte en AlertaVital. Para completar la configuración y asegurar tu cuenta, por favor, haz clic en el botón de abajo.</p>
+            <p>
+              <a href="${verificationUrl}" class="button">Verificar mi Correo</a>
+            </p>
+            <p>Este enlace de verificación es válido por 1 hora.</p>
             <div class="footer">
               <p>Si el botón no funciona, copia y pega el siguiente enlace en tu navegador:</p>
               <p><a href="${verificationUrl}" class="link">${verificationUrl}</a></p>
