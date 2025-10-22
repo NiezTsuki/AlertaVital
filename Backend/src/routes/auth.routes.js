@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, login, me, verifyEmail } from '../controllers/auth.controller.js';
+import { register, login, me, verifyEmail, resetPassword } from '../controllers/auth.controller.js';
 import { auth } from '../middleware/auth.js';
 import Pusher from 'pusher';
 import { config } from '../config/env.js';
@@ -19,6 +19,9 @@ router.post('/register', register);
 router.post('/login', login);
 router.get('/me', auth, me);
 router.post('/verify-email', verifyEmail);
+
+router.post('/request-password-reset', requestPasswordReset);
+router.post('/reset-password', resetPassword);
 
 
 // --- Ruta de Autorización para Pusher ---

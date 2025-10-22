@@ -62,6 +62,19 @@ class Api {
     }
   }
 
+  // Reseteo de contraseña
+  static Future<Map<String, dynamic>> requestPasswordReset(String correo) async {
+    final uri = Uri.parse('$baseUrl/api/request-password-reset');
+    final res = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'correo': correo}),
+    );
+    final body = jsonDecode(res.body);
+    if (res.statusCode == 200) return body;
+    throw Exception(body['error'] ?? 'Error al solicitar el reseteo');
+  }
+
 
   /// ---------- VÍNCULOS (ADULTO MAYOR ↔ CUIDADOR) ----------
 

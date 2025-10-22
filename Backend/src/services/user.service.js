@@ -78,3 +78,11 @@ export async function setCorreoVerificado(userId) {
     data: { correo_verificado_en: new Date() },
   });
 }
+
+export async function updatePassword(userId, newPassword) {
+  const newHash = await argon2.hash(newPassword, { type: argon2.argon2id });
+  await prisma.usuarios.update({
+    where: { id: userId },
+    data: { contrasena_hash: newHash },
+  });
+}

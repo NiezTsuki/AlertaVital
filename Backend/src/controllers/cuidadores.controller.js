@@ -56,30 +56,50 @@ export async function postSolicitarVinculo(req, res) {
 
     try {
       await resend.emails.send({
-        from: 'AlertaVital <noreply@alertavital.xyz>', 
-        to: [receptor.correo],
-        subject: `💌 Tienes una invitación para vincularte en AlertaVital`,
-        html: `
-          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
-            <div style="background-color: #f4f7f6; padding: 20px;">
-              <h1 style="color: #0056b3; text-align: center;">Invitación de Vínculo</h1>
+      from: 'AlertaVital <noreply@alertavital.xyz>',
+      to: [receptor.correo],
+      subject: `💌 Tienes una invitación para vincularte en AlertaVital`,
+      html: `
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { margin: 0; padding: 0; background-color: #f2f0f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+            .container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border-top: 5px solid #6A5ACD; }
+            .header { text-align: center; padding: 40px 20px 20px 20px; }
+            .header img { max-width: 130px; }
+            .content { padding: 0 40px 40px 40px; color: #333333; line-height: 1.6; text-align: center; }
+            .content h1 { color: #333333; font-size: 24px; margin-bottom: 15px; }
+            .content p { margin-bottom: 25px; font-size: 16px; }
+            .code-box { background-color: #f2f0f9; border-radius: 8px; padding: 20px; text-align: center; margin: 25px 0; }
+            .code { font-size: 20px; font-weight: bold; letter-spacing: 3px; margin: 0; color: #FF6347; /* Rojo/Coral del logo */ word-break: break-all; }
+            .footer { padding: 20px; text-align: center; font-size: 12px; color: #777777; background-color: #fafafa; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <img src="https://alerta-vital-ejvs.vercel.app/AlertaVital.png" alt="Logo de AlertaVital">
             </div>
-            <div style="padding: 20px;">
-              <h2 style="color: #333;">¡Hola, ${receptor.nombre_completo}!</h2>
-              <p>Has recibido una invitación de <strong>${emisor.nombre_completo}</strong> para conectar en la aplicación <strong>AlertaVital</strong>.</p>
-              <p>Para aceptar esta invitación y completar el vínculo, por favor, abre la aplicación, ve a la sección <strong>"Aceptar Invitación"</strong> y pega el siguiente código:</p>
-              <div style="background-color: #eef2f7; border-radius: 8px; padding: 20px; text-align: center; margin: 25px 0;">
-                <p style="font-size: 20px; font-weight: bold; letter-spacing: 3px; margin: 0; color: #0056b3;">${token}</p>
+            <div class="content">
+              <h1>¡Has recibido una invitación!</h1>
+              <p><strong>${emisor.nombre_completo}</strong> te ha invitado a conectar en la aplicación <strong>AlertaVital</strong>.</p>
+              <p>Para aceptar, abre la app, ve a "Aceptar Invitación" y pega el siguiente código:</p>
+              <div class="code-box">
+                <p class="code">${token}</p>
               </div>
-              <p>Este código es personal y tiene una validez de 24 horas.</p>
-              <p style="margin-top: 30px;">Gracias,<br>El equipo de AlertaVital</p>
+              <p style="font-size: 14px; color: #555;">Este código es personal y tiene una validez de 24 horas.</p>
             </div>
-            <div style="background-color: #f4f7f6; padding: 15px; text-align: center; font-size: 12px; color: #777;">
+            <div class="footer">
               <p>Si no esperabas esta invitación, puedes ignorar este correo de forma segura.</p>
             </div>
           </div>
-        `,
-      });
+        </body>
+        </html>
+      `,
+    });
       console.log(`Correo de invitación enviado exitosamente a ${receptor.correo}`);
     } catch (emailError) {
       console.error("Error al enviar el correo con Resend:", emailError);

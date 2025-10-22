@@ -7,7 +7,8 @@ import {
   issueToken, 
   setLastLogin, 
   getUserById,
-  setCorreoVerificado 
+  setCorreoVerificado ,
+  updatePassword
 } from '../services/user.service.js';
 import { config } from '../config/env.js';
 
@@ -152,4 +153,102 @@ export async function me(req, res) {
     console.error('[ME_ERROR]', e);
     res.status(500).json({ error: 'Ocurrió un error al obtener los datos del usuario.' });
   }
+}
+
+// Solicitar Reseteo de Contraseña
+export async function requestPasswordReset(req, res) {
+  try {
+    const { correo } = req.body;
+    if (!correo) return res.status(400).json({ error: 'Se requiere un correo electrónico.' });
+
+    const user = await findUserByEmail(correo);
+    
+    // Por seguridad, siempre devolvemos un mensaje de éxito, incluso si el correo no existe.
+    // Esto evita que alguien pueda adivinar qué correos están registrados.
+    if (user) {
+      const resetToken = jwt.sign(
+        { userId: user.id, type: 'PASSWORD_RESET' },
+        config.jwtSecret,
+        { expiresIn: '15m' } // El enlace es válido por 15 minutos
+      );
+
+      // La URL debe apuntar a tu nueva página estática de reseteo.
+      const resetUrl = `${config.frontendUrl}/reset-password?token=${resetToken}`;
+
+      await resend.emails.send({
+        from: 'AlertaVital <noreply@alertavital.xyz>',
+        to: [user.correo],
+        subject: 'Restablece tu contraseña de AlertaVital',
+        html: `
+          <!DOCTYPE html>
+          <html lang="es">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { margin: 0; padding: 0; background-color: #f2f0f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+              .container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border-top: 5px solid #6A5ACD; }
+              .content { padding: 40px; text-align: center; color: #333333; }
+              .logo { max-width: 130px; margin: 0 auto 30px auto; }
+              h1 { font-size: 24px; margin-bottom: 15px; }
+              p { margin-bottom: 25px; font-size: 16px; line-height: 1.6; }
+              .button { display: inline-block; background-color: #FF6347; color: #ffffff !important; padding: 15px 30px; font-size: 16px; font-weight: bold; text-decoration: none; border-radius: 5px; }
+              .footer { margin-top: 30px; font-size: 12px; color: #777777; }
+              .link { word-break: break-all; color: #007bff; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="content">
+                <img src="https://alerta-vital-ejvs.vercel.app/AlertaVital.png" alt="Logo de AlertaVital" class="logo">
+                <h1>¿Olvidaste tu contraseña?</h1>
+                <p>Recibimos una solicitud para restablecer la contraseña de tu cuenta. Haz clic en el botón de abajo para crear una nueva.</p>
+                <p>
+                  <a href="${resetUrl}" class="button">Restablecer Contraseña</a>
+                </p>
+                <p>Este enlace es válido por 15 minutos.</p>
+                <div class="footer">
+                  <p>Si el botón no funciona, copia y pega el siguiente enlace en tu navegador:</p>
+                  <p><a href="${resetUrl}" class="link">${resetUrl}</a></p>
+                  <p style="margin-top: 20px;">Si no solicitaste este cambio, puedes ignorar este correo de forma segura.</p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `,
+      });
+    }
+
+    res.json({ message: 'Si tu correo está registrado, recibirás un enlace para restablecer tu contraseña.' });
+
+  } catch (e) {
+    console.error('[REQUEST_RESET_ERROR]', e);
+    res.status(500).json({ error: 'Ocurrió un error en el servidor.' });
+  }
+}
+
+// Confirmar Reseteo de Contraseña
+export async function resetPassword(req, res) {
+    try {
+        const { token, newPassword } = req.body;
+
+        if (!token || !newPassword) return res.status(400).json({ error: 'Token y nueva contraseña son requeridos.' });
+        if (newPassword.length < 6) return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres.' });
+
+        const payload = jwt.verify(token, config.jwtSecret);
+        
+        if (payload.type !== 'PASSWORD_RESET') {
+            return res.status(400).json({ error: 'Token inválido para esta acción.' });
+        }
+
+        // Llama al servicio para hashear y guardar la nueva contraseña
+        await updatePassword(payload.userId, newPassword);
+
+        res.json({ message: 'Contraseña actualizada exitosamente. Ya puedes iniciar sesión con tu nueva contraseña.' });
+
+    } catch (e) {
+        console.error('[RESET_PASSWORD_ERROR]', e);
+        res.status(400).json({ error: 'El enlace para restablecer la contraseña es inválido o ha expirado.' });
+    }
 }
