@@ -173,7 +173,7 @@ export async function requestPasswordReset(req, res) {
       );
 
       // La URL debe apuntar a tu nueva página estática de reseteo.
-      const resetUrl = `${config.cambiodUrl}/reset-password?token=${resetToken}`;
+      const resetUrl = `${config.cambiodUrl}?token=${resetToken}`;
 
       await resend.emails.send({
         from: 'AlertaVital <noreply@alertavital.xyz>',
