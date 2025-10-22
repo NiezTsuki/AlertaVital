@@ -20,6 +20,9 @@ export const config = {
 
   // URL de tu aplicación frontend (para los correos)
   frontendUrl: process.env.FRONTEND_URL,
+  
+  // URL de reestablecer contraseña
+  cambiodUrl: process.env.CAMBIO_URL,
 
   // API Key para el envío de correos
   resendApiKey: process.env.RESEND_API_KEY
