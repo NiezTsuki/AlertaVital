@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../api.dart'; // Importa la API para usar la nueva función
+import '../api.dart';
 import '../auth_state.dart';
 import '../widgets/brand_header.dart';
 import '../widgets/soft_background.dart';
@@ -34,7 +34,6 @@ class _LoginPageState extends State<LoginPage> {
       if (!ok) {
         setState(() {
           _loading = false;
-          // El error se obtiene desde el authState si se implementa, o se pone uno genérico
           _error = 'Credenciales inválidas o cuenta no verificada.';
         });
       }
@@ -76,17 +75,13 @@ class _LoginPageState extends State<LoginPage> {
               onPressed: () async {
                 final email = emailController.text.trim();
                 if (email.isEmpty || !email.contains('@')) return;
-
-                // Llama a la nueva función de la API
                 try {
                   await Api.requestPasswordReset(email);
                 } catch (e) {
                   print("Error en requestPasswordReset: $e");
-                  // No mostramos el error al usuario por seguridad
                 }
-                
                 if (!mounted) return;
-                Navigator.of(context).pop(); // Cierra el diálogo
+                Navigator.of(context).pop();
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Si el correo está registrado, recibirás un enlace en breve.')),
                 );
@@ -153,16 +148,16 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                           ),
                           
-                          // ✅ BOTÓN DE OLVIDASTE TU CONTRASEÑA AÑADIDO
+                          // ✅ BOTÓN CENTRADO
                           Align(
-                            alignment: Alignment.centerRight,
+                            alignment: Alignment.center,
                             child: TextButton(
                               onPressed: () => _showForgotPasswordDialog(context),
                               child: const Text('¿Olvidaste tu contraseña?'),
                             ),
                           ),
-
-                          const SizedBox(height: 8),
+                          
+                          const SizedBox(height: 4),
                           TextButton(
                             onPressed: () => Navigator.pushNamed(context, '/register'),
                             child: const Text('¿No tienes cuenta? Regístrate'),

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, login, me, verifyEmail, resetPassword } from '../controllers/auth.controller.js';
+import { register, login, me, verifyEmail, resetPassword, requestPasswordReset } from '../controllers/auth.controller.js';
 import { auth } from '../middleware/auth.js';
 import Pusher from 'pusher';
 import { config } from '../config/env.js';
