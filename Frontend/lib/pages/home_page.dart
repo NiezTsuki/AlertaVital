@@ -15,6 +15,7 @@ import 'mis_vinculos_page.dart';
 import 'login_page.dart';
 import 'mapa_alerta_page.dart';
 import 'aceptar_vinculo_page.dart';
+import 'asistente_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -315,6 +316,15 @@ class _HomePageState extends State<HomePage> {
             ? const CircularProgressIndicator()
             : (_esAdultoMayor ? _buildVistaAdultoMayor() : _buildVistaCuidador()),
       ),
+      floatingActionButton: _esAdultoMayor
+        ? FloatingActionButton(
+            onPressed: () {
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AsistentePage()));
+            },
+            tooltip: 'Asistente de Compañía',
+            child: const Icon(Icons.support_agent),
+          )
+        : null,
     );
   }
 
@@ -388,7 +398,6 @@ class _CaregiverView extends StatelessWidget {
   }
 }
 
-// ✅ WIDGET DE TARJETA CON BOTONES CORREGIDOS Y MEJORADO
 class _IncomingCard extends StatelessWidget {
   final _IncomingAlert item;
   final VoidCallback onAccept;
@@ -422,7 +431,6 @@ class _IncomingCard extends StatelessWidget {
             if (isExpired)
               const Center(child: Text('Tiempo agotado. La alerta fue derivada.', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w500, color: Colors.grey)))
             else
-              // ✅ CORRECCIÓN FINAL: BOTONES ENVUELTOS EN EXPANDED
               Row(children: [
                 Expanded(
                   child: OutlinedButton.icon(

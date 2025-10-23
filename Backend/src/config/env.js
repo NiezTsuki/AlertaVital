@@ -25,5 +25,8 @@ export const config = {
   cambiodUrl: process.env.CAMBIO_URL,
 
   // API Key para el envío de correos
-  resendApiKey: process.env.RESEND_API_KEY
+  resendApiKey: process.env.RESEND_API_KEY,
+
+  // API gemini 
+  geminiApiKey: process.env.GEMINI_API_KEY
 };

@@ -21,6 +21,9 @@ dependencies:
   pusher_channels_flutter: ^2.2.1
   firebase_core: ^2.27.0
   firebase_messaging: ^14.7.19
+  speech_to_text: ^6.6.2
+  flutter_tts: ^3.8.5
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:
