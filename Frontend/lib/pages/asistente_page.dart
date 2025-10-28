@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart'; 
+import 'package:provider/provider.dart';
 import '../asistente_api.dart';
+import '../auth_state.dart'; // Importar la clase AuthState
 
 class AsistentePage extends StatefulWidget {
   const AsistentePage({super.key});
@@ -17,8 +19,7 @@ class _AsistentePageState extends State<AsistentePage> {
   String _estado = "Toca el micrófono para hablar";
   bool _isListening = false;
   String _textoEscuchado = "";
-  // El historial usa el formato de chat de Gemini: List<Map>
-  final List<Map<String, dynamic>> _historial = [];
+  final List<Map<String, dynamic>> _historial = []; // Historial de la conversación
 
   @override
   void initState() {
@@ -27,29 +28,23 @@ class _AsistentePageState extends State<AsistentePage> {
   }
 
   void _initSpeech() async {
-    // Inicializa el motor de SpeechToText, pero los permisos se piden al interactuar.
     await _speechToText.initialize(); 
   }
   
-  // ********** FUNCIÓN DE ALTERNANCIA (TOGGLE) **********
+  // Lógica de alternancia (Toggle) para iniciar/detener la grabación
   void _toggleListening() async {
     if (_isListening) {
-      // 1. Detener escucha (segundo toque)
       _stopListening();
     } else {
-      // 2. Iniciar escucha (primer toque)
       await _startListening(); 
     }
   }
-  // ****************************************************
 
-  // Función para solicitar y verificar el permiso del micrófono
+  // Función de verificación de permisos
   Future<bool> _checkMicrophonePermission() async {
     var status = await Permission.microphone.status;
     
-    if (status.isGranted) {
-      return true;
-    }
+    if (status.isGranted) return true;
 
     status = await Permission.microphone.request();
 
@@ -69,7 +64,7 @@ class _AsistentePageState extends State<AsistentePage> {
     }
     
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Permiso de micrófono denegado. Es necesario para usar el asistente.')),
+      const SnackBar(content: Text('Permiso de micrófono denegado.')),
     );
     return false;
   }
@@ -83,7 +78,6 @@ class _AsistentePageState extends State<AsistentePage> {
       return; 
     }
     
-    // Si el permiso está OK, procedemos a escuchar:
     await _speechToText.listen(
       onResult: (result) {
         setState(() {
@@ -96,12 +90,11 @@ class _AsistentePageState extends State<AsistentePage> {
     setState(() {
       _isListening = true;
       _estado = "Escuchando... Toca para terminar.";
-      _textoEscuchado = ""; // Limpiar el texto anterior antes de grabar
+      _textoEscuchado = ""; 
     });
   }
 
   void _stopListening() async {
-    // Detener la escucha, sin importar el tiempo que haya pasado
     await _speechToText.stop();
     
     setState(() {
@@ -109,7 +102,6 @@ class _AsistentePageState extends State<AsistentePage> {
       _estado = "Pensando...";
     });
     
-    // Si se capturó algo, lo enviamos a Gemini
     if (_textoEscuchado.isNotEmpty) {
       _enviarAGemini(_textoEscuchado);
     } else {
@@ -120,34 +112,50 @@ class _AsistentePageState extends State<AsistentePage> {
   }
 
   Future<void> _enviarAGemini(String texto) async {
-    // ********** CORRECCIÓN DEL FORMATO DE GEMINI **********
-    // Se añade el mensaje del usuario con 'parts' como arreglo de objetos.
+    // 1. OBTENER EL TOKEN DESDE EL PROVIDER
+    if (!mounted) return;
+    final authState = Provider.of<AuthState>(context, listen: false);
+    final userToken = authState.token; 
+
+    if (userToken == null || authState.user == null) {
+      await _hablar("No tienes una sesión activa. Por favor, inicia sesión.");
+      if (mounted) setState(() { _estado = "Error de sesión."; });
+      return;
+    }
+    
+    // 2. CORRECCIÓN DEL FORMATO DE GEMINI (parts como arreglo de objetos)
     _historial.add({
       "role": "user", 
       "parts": [{"text": texto}] 
     }); 
     
     try {
-      final respuesta = await AsistenteApi.conversar(texto, _historial);
+      // 3. LLAMADA CORREGIDA: Pasa el token real
+      final respuesta = await AsistenteApi.conversar(texto, _historial, userToken);
       
-      // Se añade la respuesta del modelo, también con 'parts' como arreglo de objetos.
+      // 4. CORRECCIÓN DEL FORMATO PARA GUARDAR LA RESPUESTA
       _historial.add({"role": "model", "parts": [ {"text": respuesta} ]}); 
       
       await _hablar(respuesta);
     } catch (e) {
-      // Registrar el error para diagnóstico (importante si falla Gemini)
       print('ERROR AL COMUNICARSE CON ASISTENTE/GEMINI: $e'); 
-      await _hablar("Lo siento, hubo un error. Por favor, intenta de nuevo.");
+      // Manejar el 401 que viene desde AsistenteApi
+      await _hablar(e.toString().contains('401') 
+          ? "Tu sesión ha expirado, por favor vuelve a iniciar." 
+          : "Lo siento, hubo un error. Por favor, intenta de nuevo."
+      );
     }
     
-    setState(() {
-      _textoEscuchado = "";
-      _estado = "Toca el micrófono para hablar";
-    });
+    if (mounted) {
+      setState(() {
+        _textoEscuchado = "";
+        _estado = "Toca el micrófono para hablar";
+      });
+    }
   }
 
   Future<void> _hablar(String texto) async {
-    setState(() { _estado = "Hablando..."; });
+    if (mounted) setState(() { _estado = "Hablando..."; });
     await _flutterTts.setLanguage("es-ES");
     await _flutterTts.setPitch(1.0);
     await _flutterTts.speak(texto);
@@ -168,11 +176,9 @@ class _AsistentePageState extends State<AsistentePage> {
             Text(_textoEscuchado, style: Theme.of(context).textTheme.bodyLarge),
             const Spacer(),
             GestureDetector(
-              // ********** USAR TAP PARA ALTERNAR LA GRABACIÓN **********
               onTap: _toggleListening,
               child: CircleAvatar(
                 radius: 80,
-                // El color del micrófono indica si está escuchando
                 backgroundColor: _isListening ? Colors.redAccent : Theme.of(context).colorScheme.primary,
                 child: const Icon(Icons.mic, color: Colors.white, size: 100),
               ),

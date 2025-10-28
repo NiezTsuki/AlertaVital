@@ -5,7 +5,7 @@ const genAI = new GoogleGenerativeAI(config.geminiApiKey);
 
 export async function conversarConGemini(textoUsuario, historial) {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     
     // Inicia una conversación con historial para que recuerde cosas
     const chat = model.startChat({
