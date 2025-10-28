@@ -1,23 +1,25 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from '../config/env.js';
 
-// ELIMINAR ESTA LÍNEA: const genAI = new GoogleGenerativeAI(config.geminiApiKey); 
-// Inicializaremos dentro de la función.
+// ********** CORRECCIÓN: Inicialización global y final **********
+// La variable de entorno ya debe estar cargada en este punto.
+const genAI = new GoogleGenerativeAI(config.geminiApiKey); 
+// *************************************************************
 
 export async function conversarConGemini(textoUsuario, historial) {
   try {
-    // 1. INICIALIZACIÓN MOVIMIENTO DENTRO DE LA FUNCIÓN
-    const geminiApiKey = config.geminiApiKey;
-    if (!geminiApiKey) {
-      console.error("[GEMINI_ERROR] Clave no cargada en Vercel.");
+    // ELIMINAR TODA LA LÓGICA DE CARGA DE CLAVE AQUÍ PARA MAXIMIZAR LA VELOCIDAD
+    
+    // Si la clave no se cargó globalmente, esto fallará, lo cual es correcto.
+    if (!config.geminiApiKey) {
+      console.error("[GEMINI_ERROR] Clave de API no configurada al inicio del módulo.");
       throw new Error("Clave API de Gemini no configurada en Vercel.");
     }
-    const genAI = new GoogleGenerativeAI(geminiApiKey);
     
-    // 2. USO NORMAL
+    // 1. USO NORMAL
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); 
     
-    // ... (resto del código igual)
+    // 2. CHAT SETUP
     const chat = model.startChat({
       history: historial,
       generationConfig: {
@@ -29,9 +31,11 @@ export async function conversarConGemini(textoUsuario, historial) {
     const result = await chat.sendMessage(contentParts); 
     const response = result.response;
     
+    // Verificación de respuesta
     if (!response || !response.text) {
-        console.error("[GEMINI_ERROR] Respuesta nula. Revisar latencia.");
-        throw new Error("El modelo no pudo generar una respuesta.");
+        // Si no responde, la latencia es demasiado alta o el servicio está bloqueado.
+        console.error("[GEMINI_ERROR] Respuesta nula/vacía a pesar del 200 OK.");
+        throw new Error("La IA no pudo generar una respuesta (Timeout).");
     }
 
     return response.text; 
