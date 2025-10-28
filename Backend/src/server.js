@@ -9,6 +9,7 @@ import alertasRoutes from './routes/alertas.routes.js';
 import ubicacionesRoutes from './routes/ubicaciones.routes.js';
 import alertasPosRoutes from './routes/alertas_posiciones.routes.js';
 import usuariosRoutes from './routes/usuarios.routes.js'; 
+import asistenteRoutes from './routes/asistente.routes.js';
 
 const app = express();
 app.use(helmet());
@@ -24,6 +25,7 @@ app.use('/api', ubicacionesRoutes);
 app.use('/api', alertasPosRoutes);
 app.use('/api', alertasRoutes);
 app.use('/api', usuariosRoutes); 
+app.use('/api/asistente', asistenteRoutes);
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:permission_handler/permission_handler.dart'; // <--- 1. Importar el manejador de permisos
 import '../asistente_api.dart';
 
 class AsistentePage extends StatefulWidget {
@@ -25,10 +26,58 @@ class _AsistentePageState extends State<AsistentePage> {
   }
 
   void _initSpeech() async {
-    await _speechToText.initialize();
+    // Ya que la inicialización solo verifica si la plataforma soporta el STT,
+    // podemos dejar la solicitud de permiso para cuando el usuario interactúe.
+    await _speechToText.initialize(); 
   }
 
+  // ********** 2. FUNCIÓN DE VERIFICACIÓN DE PERMISOS AÑADIDA **********
+  Future<bool> _checkMicrophonePermission() async {
+    var status = await Permission.microphone.status;
+    
+    if (status.isGranted) {
+      return true;
+    }
+
+    status = await Permission.microphone.request();
+
+    if (status.isGranted) {
+      return true;
+    } else if (status.isPermanentlyDenied) {
+      // Si está permanentemente denegado, mostramos una alerta para ir a Configuración.
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('El micrófono está bloqueado. Abre la configuración de la app para activarlo.'),
+          action: SnackBarAction(
+            label: 'Abrir Configuración',
+            onPressed: openAppSettings, 
+          ),
+        ),
+      );
+      return false;
+    }
+    
+    // Para cualquier otro estado (denegado temporalmente, etc.)
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Permiso de micrófono denegado. Es necesario para usar el asistente.')),
+    );
+    return false;
+  }
+  // ********************************************************************
+
   void _startListening() async {
+    // ********** 3. LLAMAR A LA FUNCIÓN DE PERMISOS **********
+    final granted = await _checkMicrophonePermission();
+    if (!granted) {
+      // Si el permiso no fue concedido, salimos de la función sin iniciar la escucha.
+      setState(() {
+         _estado = "Permiso no concedido.";
+      });
+      return; 
+    }
+    // ******************************************************
+    
+    // Si el permiso está OK, procedemos a escuchar:
     await _speechToText.listen(
       onResult: (result) {
         setState(() {
@@ -58,6 +107,8 @@ class _AsistentePageState extends State<AsistentePage> {
     }
   }
 
+  // ... (el resto de tus funciones: _enviarAGemini, _hablar, build)
+  
   Future<void> _enviarAGemini(String texto) async {
     // Añade el mensaje del usuario al historial
     _historial.add({"role": "user", "parts": texto});
