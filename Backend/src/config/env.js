@@ -1,7 +1,7 @@
-import dotenv from 'dotenv';
-dotenv.config();
+// IMPORTANTE: Eliminamos 'import dotenv from 'dotenv';' y 'dotenv.config();'
+// Vercel inyecta las variables directamente en process.env
 
-//conexiones
+// conexiones
 export const config = {
   port: process.env.PORT || 3000,
   jwtSecret: process.env.JWT_SECRET || 'dev',
@@ -10,9 +10,9 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
 
 //pusher
-  pusherAppId:   process.env.PUSHER_APP_ID,
-  pusherKey:     process.env.PUSHER_KEY,
-  pusherSecret:  process.env.PUSHER_SECRET,
+  pusherAppId:   process.env.PUSHER_APP_ID,
+  pusherKey:     process.env.PUSHER_KEY,
+  pusherSecret:  process.env.PUSHER_SECRET,
   pusherCluster: process.env.PUSHER_CLUSTER,
 
   //servicios firebase
