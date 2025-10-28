@@ -1,27 +1,22 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from '../config/env.js';
 
-// *** ¡ADVERTENCIA DE SEGURIDAD! ESTO ES SOLO PARA PRUEBAS! ***
-// La clave está fija aquí para descartar el error de inyección de Vercel.
-// REEMPLAZA ESTA CADENA CON LA CLAVE COMPLETA QUE USÓ EN CURL:
-const CLAVE_DIRECTA = "AIzaSyB-0_8f1_HjdcPh5Ni5uh7rcmmv2MKOhjQ"; // <--- CLAVE HARDCODEADA AQUÍ
-
-// La inicialización usa la clave HARDCODEADA para el test final.
-const genAI = new GoogleGenerativeAI(CLAVE_DIRECTA); 
-// *************************************************************
+// Inicialización de genAI con la variable de entorno.
+// Esta es la forma segura y optimizada para entornos serverless.
+const genAI = new GoogleGenerativeAI(config.geminiApiKey); 
 
 export async function conversarConGemini(textoUsuario, historial) {
   try {
-    // Si la clave es inválida, este es el punto de falla final.
-    if (!CLAVE_DIRECTA || CLAVE_DIRECTA.length < 10) {
-      console.error("[GEMINI_ERROR] Clave no definida en el código.");
-      throw new Error("Clave API de Gemini no definida.");
+    // Verificar que la clave se haya cargado correctamente
+    if (!config.geminiApiKey) {
+      console.error("[GEMINI_ERROR] Clave de API no cargada en config/env.js");
+      throw new Error("Clave API de Gemini no configurada.");
     }
     
-    // 1. USO NORMAL
+    // 1. Uso normal con el modelo gemini-2.5-flash
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); 
     
-    // 2. CHAT SETUP
+    // 2. Chat setup
     const chat = model.startChat({
       history: historial,
       generationConfig: {
@@ -29,13 +24,14 @@ export async function conversarConGemini(textoUsuario, historial) {
       },
     });
 
+    // 3. Envío del mensaje como array de partes (solución a request is not iterable)
     const contentParts = [{ text: textoUsuario }];
     const result = await chat.sendMessage(contentParts); 
     const response = result.response;
     
-    // Verificación de respuesta
+    // 4. Verificación de respuesta
     if (!response || !response.text) {
-        console.error("[GEMINI_ERROR] Respuesta nula/vacía. Probable fallo de la clave.");
+        console.error("[GEMINI_ERROR] Respuesta nula/vacía.");
         throw new Error("La IA no pudo generar una respuesta.");
     }
 
@@ -43,6 +39,7 @@ export async function conversarConGemini(textoUsuario, historial) {
 
   } catch (error) {
     console.error("💥 [GEMINI_ERROR] Fallo al procesar la IA:", error);
-    throw new Error(`Problema al conectar con la IA. Mensaje: ${error.message || error}`);
+    // Lanzamos un error legible que Express maneja con el código 500
+    throw new Error(`Error de IA. Mensaje: ${error.message || error}`);
   }
 }
