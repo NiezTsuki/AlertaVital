@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import 'package:permission_handler/permission_handler.dart'; // <--- 1. Importar el manejador de permisos
+import 'package:permission_handler/permission_handler.dart'; 
 import '../asistente_api.dart';
 
 class AsistentePage extends StatefulWidget {
@@ -17,6 +17,7 @@ class _AsistentePageState extends State<AsistentePage> {
   String _estado = "Toca el micrófono para hablar";
   bool _isListening = false;
   String _textoEscuchado = "";
+  // El historial usa el formato de chat de Gemini: List<Map>
   final List<Map<String, dynamic>> _historial = [];
 
   @override
@@ -26,12 +27,23 @@ class _AsistentePageState extends State<AsistentePage> {
   }
 
   void _initSpeech() async {
-    // Ya que la inicialización solo verifica si la plataforma soporta el STT,
-    // podemos dejar la solicitud de permiso para cuando el usuario interactúe.
+    // Inicializa el motor de SpeechToText, pero los permisos se piden al interactuar.
     await _speechToText.initialize(); 
   }
+  
+  // ********** FUNCIÓN DE ALTERNANCIA (TOGGLE) **********
+  void _toggleListening() async {
+    if (_isListening) {
+      // 1. Detener escucha (segundo toque)
+      _stopListening();
+    } else {
+      // 2. Iniciar escucha (primer toque)
+      await _startListening(); 
+    }
+  }
+  // ****************************************************
 
-  // ********** 2. FUNCIÓN DE VERIFICACIÓN DE PERMISOS AÑADIDA **********
+  // Función para solicitar y verificar el permiso del micrófono
   Future<bool> _checkMicrophonePermission() async {
     var status = await Permission.microphone.status;
     
@@ -44,7 +56,6 @@ class _AsistentePageState extends State<AsistentePage> {
     if (status.isGranted) {
       return true;
     } else if (status.isPermanentlyDenied) {
-      // Si está permanentemente denegado, mostramos una alerta para ir a Configuración.
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('El micrófono está bloqueado. Abre la configuración de la app para activarlo.'),
@@ -57,25 +68,20 @@ class _AsistentePageState extends State<AsistentePage> {
       return false;
     }
     
-    // Para cualquier otro estado (denegado temporalmente, etc.)
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Permiso de micrófono denegado. Es necesario para usar el asistente.')),
     );
     return false;
   }
-  // ********************************************************************
 
-  void _startListening() async {
-    // ********** 3. LLAMAR A LA FUNCIÓN DE PERMISOS **********
+  Future<void> _startListening() async {
     final granted = await _checkMicrophonePermission();
     if (!granted) {
-      // Si el permiso no fue concedido, salimos de la función sin iniciar la escucha.
       setState(() {
          _estado = "Permiso no concedido.";
       });
       return; 
     }
-    // ******************************************************
     
     // Si el permiso está OK, procedemos a escuchar:
     await _speechToText.listen(
@@ -86,18 +92,24 @@ class _AsistentePageState extends State<AsistentePage> {
       },
       localeId: 'es_ES', // Español
     );
+    
     setState(() {
       _isListening = true;
-      _estado = "Escuchando...";
+      _estado = "Escuchando... Toca para terminar.";
+      _textoEscuchado = ""; // Limpiar el texto anterior antes de grabar
     });
   }
 
   void _stopListening() async {
+    // Detener la escucha, sin importar el tiempo que haya pasado
     await _speechToText.stop();
+    
     setState(() {
       _isListening = false;
       _estado = "Pensando...";
     });
+    
+    // Si se capturó algo, lo enviamos a Gemini
     if (_textoEscuchado.isNotEmpty) {
       _enviarAGemini(_textoEscuchado);
     } else {
@@ -107,17 +119,24 @@ class _AsistentePageState extends State<AsistentePage> {
     }
   }
 
-  // ... (el resto de tus funciones: _enviarAGemini, _hablar, build)
-  
   Future<void> _enviarAGemini(String texto) async {
-    // Añade el mensaje del usuario al historial
-    _historial.add({"role": "user", "parts": texto});
+    // ********** CORRECCIÓN DEL FORMATO DE GEMINI **********
+    // Se añade el mensaje del usuario con 'parts' como arreglo de objetos.
+    _historial.add({
+      "role": "user", 
+      "parts": [{"text": texto}] 
+    }); 
     
     try {
       final respuesta = await AsistenteApi.conversar(texto, _historial);
-      _historial.add({"role": "model", "parts": respuesta}); // Añade la respuesta de Gemini
+      
+      // Se añade la respuesta del modelo, también con 'parts' como arreglo de objetos.
+      _historial.add({"role": "model", "parts": [ {"text": respuesta} ]}); 
+      
       await _hablar(respuesta);
     } catch (e) {
+      // Registrar el error para diagnóstico (importante si falla Gemini)
+      print('ERROR AL COMUNICARSE CON ASISTENTE/GEMINI: $e'); 
       await _hablar("Lo siento, hubo un error. Por favor, intenta de nuevo.");
     }
     
@@ -149,10 +168,11 @@ class _AsistentePageState extends State<AsistentePage> {
             Text(_textoEscuchado, style: Theme.of(context).textTheme.bodyLarge),
             const Spacer(),
             GestureDetector(
-              onTapDown: (_) => _startListening(),
-              onTapUp: (_) => _stopListening(),
+              // ********** USAR TAP PARA ALTERNAR LA GRABACIÓN **********
+              onTap: _toggleListening,
               child: CircleAvatar(
                 radius: 80,
+                // El color del micrófono indica si está escuchando
                 backgroundColor: _isListening ? Colors.redAccent : Theme.of(context).colorScheme.primary,
                 child: const Icon(Icons.mic, color: Colors.white, size: 100),
               ),
