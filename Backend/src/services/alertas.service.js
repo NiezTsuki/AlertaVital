@@ -27,7 +27,8 @@ async function sendPushNotification(userId, title, body, data) {
                 android: {
                     priority: 'high',
                     notification: {
-                        sound: 'emergencia' 
+                        sound: 'emergencia',
+                        channelId: 'emergency_channel'
                     }
                 },
                 apns: {
