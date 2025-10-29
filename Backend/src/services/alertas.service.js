@@ -3,7 +3,7 @@ import admin from 'firebase-admin';
 import { prisma } from '../db/prisma.js';
 import { config } from '../config/env.js';
 
-// --- Firebase and Pusher initialization (no changes) ---
+// Firebase and Pusher 
 if (!admin.apps.length && config.firebaseServiceAccountJson) {
   try {
     const serviceAccount = JSON.parse(config.firebaseServiceAccountJson);
@@ -14,14 +14,32 @@ if (!admin.apps.length && config.firebaseServiceAccountJson) {
 
 const pusher = new Pusher({ appId: config.pusherAppId, key: config.pusherKey, secret: config.pusherSecret, cluster: config.pusherCluster, useTLS: true });
 
-// --- Helper functions (no changes) ---
 async function sendPushNotification(userId, title, body, data) {
     if (!admin.apps.length) { console.warn('[FCM] Firebase Admin no está inicializado.'); return; }
     try {
         const user = await prisma.usuarios.findUnique({ where: { id: userId }, select: { fcm_token: true } });
         const token = user?.fcm_token;
         if (token) {
-            await admin.messaging().send({ token, notification: { title, body }, data, android: { priority: 'high' }, apns: { payload: { aps: { 'content-available': 1, sound: 'default' } } } });
+            await admin.messaging().send({
+                token,
+                notification: { title, body },
+                data,
+                android: {
+                    priority: 'high',
+                    notification: {
+                        sound: 'emergencia' 
+                    }
+                },
+                apns: {
+                    payload: {
+                        aps: {
+                            'content-available': 1,
+                            // IOS
+                            sound: 'emergencia.wav' 
+                        }
+                    }
+                }
+            });
         }
     } catch (error) { console.error(`[FCM] Error al enviar notificación a ${userId}:`, error); }
 }
