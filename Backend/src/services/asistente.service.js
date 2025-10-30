@@ -20,7 +20,7 @@ export async function conversarConGemini(textoUsuario, historial) {
     const chat = model.startChat({
       history: historial,
       generationConfig: {
-        maxOutputTokens: 200, 
+        maxOutputTokens: 1024, 
       },
     });
 
