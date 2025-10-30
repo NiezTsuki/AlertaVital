@@ -12,9 +12,14 @@ router.post('/conversar', auth, async (req, res) => {
         let respuesta = await conversarConGemini(texto, historial);
         
         if (typeof respuesta === 'string') {
-            respuesta = respuesta.replace(/\n/g, ' ').replace(/\r/g, ' ').trim();
+            // 1. Eliminar caracteres de control no imprimibles (ej. \u0000 - \u001F)
+            respuesta = respuesta.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+            // 2. Reemplazar saltos de línea y retornos de carro por un espacio simple
+            respuesta = respuesta.replace(/[\n\r]/g, ' ').trim();
+            
         }
-        
+
+        // Si la limpieza funciona, Express serializará esto correctamente.
         res.json({ respuesta });
 
     } catch (e) {
@@ -24,4 +29,4 @@ router.post('/conversar', auth, async (req, res) => {
     }
 });
 
-export default router;
+export default router;;
