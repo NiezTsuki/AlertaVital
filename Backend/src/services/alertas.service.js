@@ -3,7 +3,7 @@ import admin from 'firebase-admin';
 import { prisma } from '../db/prisma.js';
 import { config } from '../config/env.js';
 
-// Firebase and Pusher 
+// --- Firebase and Pusher initialization (no changes) ---
 if (!admin.apps.length && config.firebaseServiceAccountJson) {
   try {
     const serviceAccount = JSON.parse(config.firebaseServiceAccountJson);
@@ -14,48 +14,16 @@ if (!admin.apps.length && config.firebaseServiceAccountJson) {
 
 const pusher = new Pusher({ appId: config.pusherAppId, key: config.pusherKey, secret: config.pusherSecret, cluster: config.pusherCluster, useTLS: true });
 
+// --- Helper functions (no changes) ---
 async function sendPushNotification(userId, title, body, data) {
-    if (!admin.apps.length) {
-        console.warn('[FCM] Firebase Admin no está inicializado.');
-        return;
-    }
+    if (!admin.apps.length) { console.warn('[FCM] Firebase Admin no está inicializado.'); return; }
     try {
-        const user = await prisma.usuarios.findUnique({
-            where: { id: userId },
-            select: { fcm_token: true }
-        });
+        const user = await prisma.usuarios.findUnique({ where: { id: userId }, select: { fcm_token: true } });
         const token = user?.fcm_token;
-
         if (token) {
-            await admin.messaging().send({
-                token,
-                // 'notification' SE ELIMINA DE AQUÍ
-                data: {
-                    ...data, // Mantiene los datos que ya enviabas (alertaId, etc.)
-                    title: title, // Mueve el título adentro de 'data'
-                    body: body,   // Mueve el cuerpo adentro de 'data'
-                },
-                android: {
-                    priority: 'high' // La prioridad sigue siendo importante
-                },
-                apns: {
-                    payload: {
-                        aps: {
-                            // Esto es clave para que la app se despierte en iOS en segundo plano
-                            'content-available': 1,
-                        }
-                    },
-                    headers: {
-                        // Headers recomendados para notificaciones que procesa la app en iOS
-                        'apns-push-type': 'background',
-                        'apns-priority': '10',
-                    },
-                }
-            });
+            await admin.messaging().send({ token, notification: { title, body }, data, android: { priority: 'high' }, apns: { payload: { aps: { 'content-available': 1, sound: 'default' } } } });
         }
-    } catch (error) {
-        console.error(`[FCM] Error al enviar notificación a ${userId}:`, error);
-    }
+    } catch (error) { console.error(`[FCM] Error al enviar notificación a ${userId}:`, error); }
 }
 const activeTimers = new Map();
 function clearCountdown(alertaId) { if (activeTimers.has(alertaId)) { clearTimeout(activeTimers.get(alertaId)); activeTimers.delete(alertaId); } }
