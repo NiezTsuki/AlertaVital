@@ -148,6 +148,7 @@ class _AsistentePageState extends State<AsistentePage> {
     setState(() { _estado = "Hablando..."; });
     await _flutterTts.setLanguage("es-ES");
     await _flutterTts.setPitch(1.0);
+    await _flutterTts.setSpeechRate(0.6);
     await _flutterTts.speak(texto);
     await _flutterTts.awaitSpeakCompletion(true);
     if (mounted) setState(() { _estado = "Toca el micrófono para hablar"; });

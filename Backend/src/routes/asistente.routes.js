@@ -15,6 +15,7 @@ router.post('/conversar', auth, async (req, res) => {
         
         // Limpieza de caracteres extraños antes de enviar (buena práctica)
         if (typeof respuesta === 'string') {
+            respuesta = respuesta.replace(/[*#_`]/g, '');
             respuesta = respuesta.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
             respuesta = respuesta.replace(/[\n\r]/g, ' ').trim();
         }
