@@ -15,34 +15,47 @@ if (!admin.apps.length && config.firebaseServiceAccountJson) {
 const pusher = new Pusher({ appId: config.pusherAppId, key: config.pusherKey, secret: config.pusherSecret, cluster: config.pusherCluster, useTLS: true });
 
 async function sendPushNotification(userId, title, body, data) {
-    if (!admin.apps.length) { console.warn('[FCM] Firebase Admin no está inicializado.'); return; }
+    if (!admin.apps.length) {
+        console.warn('[FCM] Firebase Admin no está inicializado.');
+        return;
+    }
     try {
-        const user = await prisma.usuarios.findUnique({ where: { id: userId }, select: { fcm_token: true } });
+        const user = await prisma.usuarios.findUnique({
+            where: { id: userId },
+            select: { fcm_token: true }
+        });
         const token = user?.fcm_token;
+
         if (token) {
             await admin.messaging().send({
                 token,
-                notification: { title, body },
-                data,
+                // 'notification' SE ELIMINA DE AQUÍ
+                data: {
+                    ...data, // Mantiene los datos que ya enviabas (alertaId, etc.)
+                    title: title, // Mueve el título adentro de 'data'
+                    body: body,   // Mueve el cuerpo adentro de 'data'
+                },
                 android: {
-                    priority: 'high',
-                    notification: {
-                        sound: 'emergencia',
-                        channelId: 'emergency_channel'
-                    }
+                    priority: 'high' // La prioridad sigue siendo importante
                 },
                 apns: {
                     payload: {
                         aps: {
+                            // Esto es clave para que la app se despierte en iOS en segundo plano
                             'content-available': 1,
-                            // IOS
-                            sound: 'emergencia.wav' 
                         }
-                    }
+                    },
+                    headers: {
+                        // Headers recomendados para notificaciones que procesa la app en iOS
+                        'apns-push-type': 'background',
+                        'apns-priority': '10',
+                    },
                 }
             });
         }
-    } catch (error) { console.error(`[FCM] Error al enviar notificación a ${userId}:`, error); }
+    } catch (error) {
+        console.error(`[FCM] Error al enviar notificación a ${userId}:`, error);
+    }
 }
 const activeTimers = new Map();
 function clearCountdown(alertaId) { if (activeTimers.has(alertaId)) { clearTimeout(activeTimers.get(alertaId)); activeTimers.delete(alertaId); } }

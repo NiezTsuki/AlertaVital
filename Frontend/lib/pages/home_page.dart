@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:pusher_channels_flutter/pusher_channels_flutter.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:awesome_notifications/awesome_notifications.dart';
 
 import '../auth_state.dart';
 import '../api.dart';
@@ -88,13 +89,38 @@ class _HomePageState extends State<HomePage> {
       if (fcmToken != null) await AlertasApi.registrarFcmToken(fcmToken);
     } catch (e) { print('🚨 Error al obtener o registrar el token FCM: $e'); }
 
+    // Este listener se activa cuando la app está abierta (en primer plano)
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print('📲 Notificación de datos recibida en primer plano: ${message.data}');
+
+      // Lógica existente para el adulto mayor
       if (message.data.isNotEmpty && _esAdultoMayor && message.data['tipo'] == 'ALERTA_ACEPTADA') {
         final textoMensaje = message.data['mensaje'] as String?;
         if (mounted) setState(() { _estadoTexto = textoMensaje ?? '¡Un cuidador va en camino!'; _stopCountdown(); });
+        // No creamos una notificación visual aquí, solo actualizamos el estado.
+        return;
       }
-      if (message.notification != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message.notification!.title ?? 'Nueva Notificación')));
+      
+      // 2. NUEVA LÓGICA PARA MOSTRAR LA NOTIFICACIÓN DE EMERGENCIA
+      // Lee el título y el cuerpo desde el payload de 'data' enviado por tu backend
+      final String? title = message.data['title'];
+      final String? body = message.data['body'];
+
+      // Si el mensaje contiene un título y un cuerpo, lo mostramos como una notificación local.
+      if (title != null && body != null) {
+        AwesomeNotifications().createNotification(
+          content: NotificationContent(
+            id: UniqueKey().hashCode, // ID único para evitar que las notificaciones se reemplacen
+            channelKey: 'emergency_channel', // IMPORTANTE: Usa el canal que definiste en main.dart
+            title: title,
+            body: body,
+            // Pasa el resto de los datos en el payload por si los necesitas al hacer clic.
+            payload: Map<String, String>.from(message.data),
+            // Esto hace que la notificación se muestre como un banner aunque la app esté abierta.
+            displayOnForeground: true, 
+          ),
+        );
+        // Opcional: si eres cuidador, refresca la lista de alertas pendientes
         if (_esCuidador) _fetchPendingAlerts();
       }
     });

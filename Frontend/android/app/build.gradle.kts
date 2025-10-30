@@ -24,7 +24,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.senior_locator_app"
-        minSdk = flutter.minSdkVersion
+        minSdk = 23
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

@@ -1,10 +1,8 @@
-// lib/main.dart
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:awesome_notifications/awesome_notifications.dart';
 
 import 'firebase_options.dart';
 import 'auth_state.dart';
@@ -18,22 +16,48 @@ import 'theme/app_theme.dart';
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   print("📲 Notificación recibida en segundo plano: ${message.messageId}");
-}
+  String? title = message.data['title'];
+  String? body = message.data['body'];
 
-// 2. DEFINE EL CANAL DE NOTIFICACIÓN PERSONALIZADO
-const AndroidNotificationChannel emergencyChannel = AndroidNotificationChannel(
-  'emergency_channel', // ID interno del canal
-  'Alertas de Emergencia', // Nombre que ve el usuario en los ajustes
-  description: 'Canal para notificaciones de emergencia de AlertaVital.', // Descripción del canal
-  importance: Importance.max, // Máxima importancia para que aparezca arriba
-  playSound: true,
-  sound: RawResourceAndroidNotificationSound('emergencia'),
-);
+  if (title != null && body != null) {
+    AwesomeNotifications().createNotification(
+      content: NotificationContent(
+        id: UniqueKey().hashCode,
+        channelKey: 'emergency_channel', 
+        title: title,
+        body: body,
+        payload: Map<String, String>.from(message.data),
+      ),
+    );
+  }
+}
 
 Future<void> main() async {
   // Asegura que los bindings de Flutter estén inicializados
   WidgetsFlutterBinding.ensureInitialized();
-  
+
+  // 2. INICIALIZA AWESOME_NOTIFICATIONS Y CREA EL CANAL
+  await AwesomeNotifications().initialize(
+    // Deja 'null' para no usar un ícono de app por defecto en la notificación.
+    // Opcionalmente, puedes poner 'resource://drawable/res_app_icon' si tienes uno.
+    null,
+    [
+      NotificationChannel(
+        channelKey: 'emergency_channel', // ID interno del canal
+        channelName: 'Alertas de Emergencia', // Nombre visible para el usuario
+        channelDescription: 'Canal para notificaciones de emergencia de AlertaVital.',
+        importance: NotificationImportance.Max, // Máxima importancia
+        playSound: true,
+        // Aquí se especifica el sonido personalizado 
+        soundSource: 'resource://raw/emergencia',
+        defaultColor: Colors.red,
+        ledColor: Colors.white,
+      )
+    ],
+    // Habilita el modo debug para ver logs en la consola
+    debug: true,
+  );
+
   // Inicializa Firebase
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
@@ -42,20 +66,11 @@ Future<void> main() async {
   // Asigna el handler de segundo plano para FCM
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-  // 3. CREA EL CANAL EN EL DISPOSITIVO ANDROID
-  // Esta lógica se ejecutará al iniciar la app y registrará el canal en el sistema.
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
-
-  await flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(emergencyChannel);
-
   // Inicia la aplicación
   runApp(const App());
 }
 
-// --- EL RESTO DEL CÓDIGO PERMANECE IGUAL ---
+// --- EL RESTO DE TU CÓDIGO PERMANECE IGUAL ---
 
 class App extends StatelessWidget {
   const App({super.key});
