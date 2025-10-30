@@ -26,7 +26,7 @@ export async function conversarConGemini(textoUsuario, historial) {
       throw new Error("Clave API de Gemini no configurada.");
     }
     
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); 
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" , systemInstruction: personalityPrompt,}); 
     
     const chat = model.startChat({
       history: historial,
