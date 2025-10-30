@@ -11,12 +11,11 @@ export async function conversarConGemini(textoUsuario, historial) {
       throw new Error("Clave API de Gemini no configurada.");
     }
     
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); 
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); 
     
     const chat = model.startChat({
       history: historial,
       generationConfig: {
-        // CORRECCIÓN CONFIRMADA: Límite aumentado a 1024
         maxOutputTokens: 1024, 
       },
     });
@@ -25,13 +24,17 @@ export async function conversarConGemini(textoUsuario, historial) {
     const result = await chat.sendMessage(contentParts); 
     const response = result.response;
     
-    if (!response || !response.text) {
-        console.error("[GEMINI_ERROR] Respuesta nula/vacía.");
+    // --- CORRECCIÓN CLAVE ---
+    // Se obtiene el texto llamando a la función text()
+    const textoRespuesta = response.text();
+    
+    if (!response || !textoRespuesta) {
+        console.error("[GEMINI_ERROR] Respuesta nula o vacía de la IA.");
         throw new Error("La IA no pudo generar una respuesta.");
     }
     
-    // **MEJORA CLAVE:** Se devuelve el texto, Express lo serializará y lo escapará.
-    return response.text; 
+    // Se devuelve el string con la respuesta correcta
+    return textoRespuesta; 
 
   } catch (error) {
     console.error("💥 [GEMINI_ERROR] Fallo al procesar la IA:", error);

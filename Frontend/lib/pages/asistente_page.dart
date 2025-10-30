@@ -21,7 +21,7 @@ class _AsistentePageState extends State<AsistentePage> {
   String _estado = "Toca el micrófono para hablar";
   bool _isListening = false;
   String _textoEscuchado = "";
-  final List<Map<String, dynamic>> _historial = []; // Historial de la conversación
+  final List<Map<String, dynamic>> _historial = [];
 
   @override
   void initState() {
@@ -41,51 +41,37 @@ class _AsistentePageState extends State<AsistentePage> {
     }
   }
 
-  // Función de verificación de permisos
   Future<bool> _checkMicrophonePermission() async {
     var status = await Permission.microphone.status;
-    
     if (status.isGranted) return true;
-
     status = await Permission.microphone.request();
-
-    if (status.isGranted) {
-      return true;
-    } else if (status.isPermanentlyDenied) {
+    if (status.isGranted) return true;
+    
+    if (status.isPermanentlyDenied && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('El micrófono está bloqueado. Abre la configuración de la app para activarlo.'),
-          action: SnackBarAction(
-            label: 'Abrir Configuración',
-            onPressed: openAppSettings, 
-          ),
+          content: const Text('Permiso de micrófono bloqueado. Ábrelo en la configuración.'),
+          action: SnackBarAction(label: 'Abrir', onPressed: openAppSettings),
         ),
       );
-      return false;
+    } else if (mounted) {
+       ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Permiso de micrófono denegado.')),
+      );
     }
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Permiso de micrófono denegado.')),
-    );
     return false;
   }
 
   Future<void> _startListening() async {
     final granted = await _checkMicrophonePermission();
     if (!granted) {
-      setState(() {
-         _estado = "Permiso no concedido.";
-      });
+      setState(() => _estado = "Permiso no concedido.");
       return; 
     }
     
     await _speechToText.listen(
-      onResult: (result) {
-        setState(() {
-          _textoEscuchado = result.recognizedWords;
-        });
-      },
-      localeId: 'es_ES', // Español
+      onResult: (result) => setState(() => _textoEscuchado = result.recognizedWords),
+      localeId: 'es_ES',
     );
     
     setState(() {
@@ -97,18 +83,13 @@ class _AsistentePageState extends State<AsistentePage> {
 
   void _stopListening() async {
     await _speechToText.stop();
-    
-    setState(() {
-      _isListening = false;
-      _estado = "Pensando...";
-    });
+    setState(() => _isListening = false);
     
     if (_textoEscuchado.isNotEmpty) {
+      setState(() => _estado = "Pensando...");
       _enviarAGemini(_textoEscuchado);
     } else {
-      setState(() {
-        _estado = "No te escuché bien, intenta de nuevo.";
-      });
+      setState(() => _estado = "No te escuché bien, intenta de nuevo.");
     }
   }
 
@@ -123,18 +104,14 @@ class _AsistentePageState extends State<AsistentePage> {
       return;
     }
     
-    // Se añade el mensaje del usuario al historial antes de la llamada
-    _historial.add({
-      "role": "user", 
-      "parts": [{"text": texto}] 
-    }); 
+    _historial.add({"role": "user", "parts": [{"text": texto}]}); 
     
     try {
-      final respuesta = await AsistenteApi.conversar(texto, _historial, userToken!);
+      // --- CORRECCIÓN DE ADVERTENCIA ---
+      // Se elimina el '!' porque la verificación anterior ya asegura que no es nulo.
+      final respuesta = await AsistenteApi.conversar(texto, _historial, userToken);
       
-      // Se añade la respuesta de Gemini al historial solo si fue exitosa
-      _historial.add({"role": "model", "parts": [ {"text": respuesta} ]}); 
-      
+      _historial.add({"role": "model", "parts": [{"text": respuesta}]}); 
       await _hablar(respuesta);
       
     } catch (e) {
@@ -142,21 +119,15 @@ class _AsistentePageState extends State<AsistentePage> {
       String fullError = e.toString();
       String errorMsg;
 
-      // 1. Manejo específico para el 401/Sesión expirada
-      if (fullError.contains('Sesión expirada') || fullError.contains('401')) {
+      if (fullError.contains('Sesión expirada')) {
           errorMsg = "Tu sesión ha expirado, por favor vuelve a iniciar.";
       } else {
-          // 2. Extraer el mensaje detallado de la excepción para reportar
           String detail = fullError.split(': ').length > 1 
               ? fullError.split(': ').sublist(1).join(': ') 
-              : "Error Desconocido. No hay detalle.";
-
-          // 3. Devolver la causa específica por voz
-          // Aquí reportará: "Fallo de la aplicación. Causa: El servidor respondió, pero el formato JSON es inválido."
+              : "No hay detalle del error.";
           errorMsg = "Fallo de la aplicación. Causa: $detail";
       }
 
-      // 4. CORRECCIÓN CRÍTICA: Si la llamada falló, se elimina el último mensaje de usuario.
       if (_historial.isNotEmpty && _historial.last['role'] == 'user') {
           _historial.removeLast();
       }
