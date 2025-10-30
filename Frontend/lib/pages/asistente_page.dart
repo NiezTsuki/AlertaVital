@@ -1,10 +1,12 @@
+// archivo: asistente_page.dart
+
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart'; 
 import 'package:provider/provider.dart';
 import '../asistente_api.dart';
-import '../auth_state.dart'; // Importar la clase AuthState
+import '../auth_state.dart'; 
 
 class AsistentePage extends StatefulWidget {
   const AsistentePage({super.key});
@@ -31,7 +33,6 @@ class _AsistentePageState extends State<AsistentePage> {
     await _speechToText.initialize(); 
   }
   
-  // Lógica de alternancia (Toggle) para iniciar/detener la grabación
   void _toggleListening() async {
     if (_isListening) {
       _stopListening();
@@ -112,7 +113,6 @@ class _AsistentePageState extends State<AsistentePage> {
   }
 
   Future<void> _enviarAGemini(String texto) async {
-    // 1. OBTENER EL TOKEN DESDE EL PROVIDER
     if (!mounted) return;
     final authState = Provider.of<AuthState>(context, listen: false);
     final userToken = authState.token; 
@@ -123,27 +123,45 @@ class _AsistentePageState extends State<AsistentePage> {
       return;
     }
     
-    // 2. CORRECCIÓN DEL FORMATO DE GEMINI (parts como arreglo de objetos)
+    // Se añade el mensaje del usuario al historial antes de la llamada
     _historial.add({
       "role": "user", 
       "parts": [{"text": texto}] 
     }); 
     
     try {
-      // 3. LLAMADA CORREGIDA: Pasa el token real
-      final respuesta = await AsistenteApi.conversar(texto, _historial, userToken);
+      final respuesta = await AsistenteApi.conversar(texto, _historial, userToken!);
       
-      // 4. CORRECCIÓN DEL FORMATO PARA GUARDAR LA RESPUESTA
+      // Se añade la respuesta de Gemini al historial solo si fue exitosa
       _historial.add({"role": "model", "parts": [ {"text": respuesta} ]}); 
       
       await _hablar(respuesta);
+      
     } catch (e) {
       print('ERROR AL COMUNICARSE CON ASISTENTE/GEMINI: $e'); 
-      // Manejar el 401 que viene desde AsistenteApi
-      await _hablar(e.toString().contains('401') 
-          ? "Tu sesión ha expirado, por favor vuelve a iniciar." 
-          : "Lo siento, hubo un error. Por favor, intenta de nuevo."
-      );
+      String fullError = e.toString();
+      String errorMsg;
+
+      // 1. Manejo específico para el 401/Sesión expirada
+      if (fullError.contains('Sesión expirada') || fullError.contains('401')) {
+          errorMsg = "Tu sesión ha expirado, por favor vuelve a iniciar.";
+      } else {
+          // 2. Extraer el mensaje detallado de la excepción para reportar
+          String detail = fullError.split(': ').length > 1 
+              ? fullError.split(': ').sublist(1).join(': ') 
+              : "Error Desconocido. No hay detalle.";
+
+          // 3. Devolver la causa específica por voz
+          // Aquí reportará: "Fallo de la aplicación. Causa: El servidor respondió, pero el formato JSON es inválido."
+          errorMsg = "Fallo de la aplicación. Causa: $detail";
+      }
+
+      // 4. CORRECCIÓN CRÍTICA: Si la llamada falló, se elimina el último mensaje de usuario.
+      if (_historial.isNotEmpty && _historial.last['role'] == 'user') {
+          _historial.removeLast();
+      }
+      
+      await _hablar(errorMsg);
     }
     
     if (mounted) {
@@ -155,11 +173,13 @@ class _AsistentePageState extends State<AsistentePage> {
   }
 
   Future<void> _hablar(String texto) async {
-    if (mounted) setState(() { _estado = "Hablando..."; });
+    if (!mounted) return;
+    setState(() { _estado = "Hablando..."; });
     await _flutterTts.setLanguage("es-ES");
     await _flutterTts.setPitch(1.0);
     await _flutterTts.speak(texto);
     await _flutterTts.awaitSpeakCompletion(true);
+    if (mounted) setState(() { _estado = "Toca el micrófono para hablar"; });
   }
 
   @override
