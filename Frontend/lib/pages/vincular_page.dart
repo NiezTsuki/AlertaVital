@@ -1,4 +1,3 @@
-// lib/pages/vincular_page.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api.dart';
@@ -23,7 +22,6 @@ class _VincularPageState extends State<VincularPage> {
     super.dispose();
   }
 
-  // ✅ CORRECCIÓN: La función ahora usa el flujo de "solicitud".
   Future<void> _solicitarVinculo() async {
     FocusScope.of(context).unfocus();
     setState(() {
@@ -45,7 +43,7 @@ class _VincularPageState extends State<VincularPage> {
       final correoContraparte = _correoCtrl.text.trim().toLowerCase();
 
       if (miCorreo == null || miRol == null) {
-         throw Exception('Tu información de usuario está incompleta.');
+        throw Exception('Tu información de usuario está incompleta.');
       }
       if (correoContraparte.isEmpty) {
         throw Exception('Por favor, ingresa el correo electrónico a vincular.');
@@ -54,7 +52,6 @@ class _VincularPageState extends State<VincularPage> {
         throw Exception('No puedes vincularte a ti mismo.');
       }
 
-      // Llama al nuevo endpoint 'solicitar' de la API
       await Api.solicitarVinculo(
         token,
         adultoCorreo: miRol == 'ADULTO_MAYOR' ? miCorreo : correoContraparte,
@@ -84,6 +81,7 @@ class _VincularPageState extends State<VincularPage> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthState>();
     final me = auth.user;
+    final theme = Theme.of(context); // Para usar colores y estilos del tema
 
     if (me == null) {
       return Scaffold(
@@ -95,59 +93,73 @@ class _VincularPageState extends State<VincularPage> {
     final soyAdulto = me['rol'] == 'ADULTO_MAYOR';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Vincular')),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const SizedBox(height: 16),
-                  Text(
-                    soyAdulto ? 'Vincula a tu Cuidador' : 'Vincula a un Adulto Mayor',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Ingresa el correo electrónico de la persona con la que deseas vincularte.',
-                     style: Theme.of(context).textTheme.bodyMedium,
-                     textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  TextField(
-                    controller: _correoCtrl,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(
-                      labelText: 'Correo de la contraparte',
-                      hintText: 'nombre@ejemplo.com',
-                      prefixIcon: Icon(Icons.email_outlined),
+      appBar: AppBar(title: const Text('Enviar Invitación')),
+      // CAMBIO: Se ajusta la estructura para centrar la tarjeta
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24.0),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            // CAMBIO: Se añade el widget Card para encerrar el contenido
+            child: Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // CAMBIO: Se añade un ícono decorativo
+                    Icon(
+                      Icons.person_add_alt_1_outlined,
+                      size: 64,
+                      color: theme.colorScheme.primary,
                     ),
-                    onSubmitted: (_) => _solicitarVinculo(),
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: FilledButton.icon(
-                      icon: _loading
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white))
-                          : const Icon(Icons.send_outlined),
-                      onPressed: _loading ? null : _solicitarVinculo,
-                      label: const Text('Enviar Solicitud'),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  if (_msg != null)
+                    const SizedBox(height: 16),
                     Text(
-                      _msg!,
+                      soyAdulto ? 'Vincula a tu Cuidador' : 'Vincula a un Adulto Mayor',
+                      style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: _msgColor, fontWeight: FontWeight.w600, fontSize: 15),
                     ),
-                ],
+                    const SizedBox(height: 8),
+                    Text(
+                      'Ingresa el correo electrónico de la persona con la que deseas vincularte para enviarle una solicitud.',
+                       style: theme.textTheme.bodyMedium?.copyWith(color: Colors.black54),
+                       textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    TextField(
+                      controller: _correoCtrl,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: const InputDecoration(
+                        labelText: 'Correo electrónico',
+                        hintText: 'nombre@ejemplo.com',
+                        prefixIcon: Icon(Icons.email_outlined),
+                      ),
+                      onSubmitted: (_) => _solicitarVinculo(),
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: FilledButton.icon(
+                        icon: _loading
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white))
+                            : const Icon(Icons.send_outlined),
+                        onPressed: _loading ? null : _solicitarVinculo,
+                        label: const Text('Enviar Solicitud'),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    if (_msg != null)
+                      Text(
+                        _msg!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: _msgColor, fontWeight: FontWeight.w600, fontSize: 15),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
