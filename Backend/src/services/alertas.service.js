@@ -111,7 +111,6 @@ export async function crearAlertaRT({ adultoId, tipo, descripcion, latitud, long
         adultoNombre: alerta.usuarios.nombre_completo 
       };
       
-      // ✅ CORRECTION: All values in the data payload are converted to String.
       const fcmDataPayload = {
         alertaId: alerta.id.toString(),
         orden: '1',
