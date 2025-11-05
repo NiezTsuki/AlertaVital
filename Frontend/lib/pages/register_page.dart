@@ -209,11 +209,17 @@ class _RegisterPageState extends State<RegisterPage> {
                               textInputAction: TextInputAction.next,
                               keyboardType: TextInputType.phone,
                               inputFormatters: [
-                                MaskedInputFormatter('+56 9 #### ####'),
                                 FilteringTextInputFormatter.allow(RegExp(r'[\d+\s]')),
+                                MaskedInputFormatter('+00 0 0000 0000 '),
                               ],
                               decoration: _inputDeco('Teléfono (Chile)', icon: Icons.phone_outlined, hint: '+56 9 1234 5678'),
                               validator: _validatePhone,
+                              onTap: () {
+                               if (_phoneCtrl.text.isEmpty) {
+                                 _phoneCtrl.text = '+56 9 ';
+                                 _phoneCtrl.selection = TextSelection.collapsed(offset: 6);
+                                }
+                             },
                             ),
                             const SizedBox(height: 14),
 
