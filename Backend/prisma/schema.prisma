@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("alertavital_PRISMA_DATABASE_URL")
+  url       = env("alertavital2_PRISMA_DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
