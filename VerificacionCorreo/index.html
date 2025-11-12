@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verificación de Correo - AlertaVital</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f4f7f6; color: #333; }
+        .container { text-align: center; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); max-width: 450px; width: 90%; }
+        .logo { margin-bottom: 25px; }
+        .logo img { max-width: 180px; height: auto; } /* Ajusta el tamaño del logo */
+        .icon { font-size: 50px; margin-bottom: 20px; }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        h1 { margin-bottom: 10px; font-size: 1.8em; }
+        p { font-size: 1.1em; line-height: 1.5; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Estilos responsivos */
+        @media (max-width: 600px) {
+            .container { padding: 30px; }
+            h1 { font-size: 1.5em; }
+            p { font-size: 1em; }
+            .logo img { max-width: 150px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <img src="AlertaVital.png" alt="Logo AlertaVital">
+        </div>
+
+        <div id="icon" class="icon"></div>
+        <h1 id="title">Verificando tu cuenta...</h1>
+        <p id="message">Por favor, espera un momento.</p>
+        <div id="loader" class="loader"></div>
+    </div>
+
+    <script>
+        const BACKEND_URL = 'https://alertavital.xyz'; 
+
+        async function verifyEmail() {
+            const container = document.querySelector('.container');
+            const iconEl = document.getElementById('icon');
+            const titleEl = document.getElementById('title');
+            const messageEl = document.getElementById('message');
+            const loaderEl = document.getElementById('loader');
+
+            try {
+                // 1. Extrae el token de la URL
+                const params = new URLSearchParams(window.location.search);
+                const token = params.get('token');
+
+                if (!token) {
+                    throw new Error('Token de verificación no encontrado en el enlace. El enlace podría estar incompleto.');
+                }
+
+                // 2. Llama a tu backend
+                const response = await fetch(`${BACKEND_URL}/api/verify-email`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: token })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Ocurrió un error desconocido al verificar tu correo.');
+                }
+
+                // 3. Muestra el mensaje de éxito
+                loaderEl.style.display = 'none';
+                iconEl.innerHTML = '✅';
+                iconEl.className = 'icon success';
+                titleEl.textContent = '¡Cuenta Verificada!';
+                messageEl.textContent = data.message + ' Ya puedes cerrar esta ventana y volver a la aplicación móvil.';
+
+            } catch (error) {
+                // 4. Muestra el mensaje de error
+                loaderEl.style.display = 'none';
+                iconEl.innerHTML = '❌';
+                iconEl.className = 'icon error';
+                titleEl.textContent = 'Error de Verificación';
+                messageEl.textContent = error.message;
+            }
+        }
+
+        // Llama a la función cuando la página cargue
+        window.onload = verifyEmail;
+    </script>
+</body>
+</html>
